@@ -37,8 +37,14 @@ class MemKDMClassModel(keras.Model):
         probs = dm2discrete(rho_y)
         return probs
 
-    def create_index(self, samples_x, samples_y):
-        with tf.device('/cpu:0'):
+    def create_index(self, samples_x, samples_y, use_cpu=False):
+        if use_cpu:
+            with tf.device('/cpu:0'):
+                self.samples_x = keras.ops.convert_to_tensor(self.encoder.predict(samples_x), dtype="float32")
+                self.samples_y = keras.ops.convert_to_tensor(samples_y, dtype="float32")
+                self.index = faiss.IndexFlatL2(self.encoded_size)
+                self.index.add(self.samples_x)
+        else:
             self.samples_x = keras.ops.convert_to_tensor(self.encoder.predict(samples_x), dtype="float32")
             self.samples_y = keras.ops.convert_to_tensor(samples_y, dtype="float32")
             self.index = faiss.IndexFlatL2(self.encoded_size)
