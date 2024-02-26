@@ -1,4 +1,4 @@
-import keras_core as keras
+import keras
 from ..layers import RBFKernelLayer, KDMProjLayer, \
                      CosineKernelLayer, CrossProductKernelLayer
 import numpy as np

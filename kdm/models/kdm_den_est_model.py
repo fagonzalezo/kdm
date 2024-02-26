@@ -1,4 +1,4 @@
-import keras_core as keras
+import keras
 from ..layers import RBFKernelLayer, KDMProjLayer
 import numpy as np
 from sklearn.metrics import pairwise_distances

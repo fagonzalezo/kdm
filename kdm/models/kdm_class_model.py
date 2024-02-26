@@ -1,4 +1,4 @@
-import keras_core as keras
+import keras
 import numpy as np
 from ..layers import KDMLayer, RBFKernelLayer
 from ..utils import pure2dm, dm2discrete

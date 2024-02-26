@@ -1,4 +1,4 @@
-import keras_core as keras
+import keras
 import numpy as np
 
 
@@ -67,6 +67,7 @@ def dm2discrete(dm):
     w = w / keras.ops.sum(w, axis=-1, keepdims=True)
     v = keras.utils.normalize(v, order=2, axis=-1)
     probs = keras.ops.einsum('...j,...ji->...i', w, v ** 2)
+    probs = keras.ops.clip(probs, 0., 1.)
     return probs
 
 

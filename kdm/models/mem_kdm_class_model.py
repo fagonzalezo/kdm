@@ -1,4 +1,4 @@
-import keras_core as keras
+import keras
 import faiss
 import numpy as np
 from ..layers import MemRBFKernelLayer, MemKDMLayer

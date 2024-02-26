@@ -1,4 +1,4 @@
-import keras_core as keras
+import keras
 
 class CompTransKernelLayer(keras.layers.Layer):
     def __init__(self, transform, kernel, **kwargs):

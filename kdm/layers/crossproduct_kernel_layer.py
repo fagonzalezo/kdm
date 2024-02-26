@@ -1,4 +1,4 @@
-import keras_core as keras
+import keras
 
 class CrossProductKernelLayer(keras.layers.Layer):
 
