@@ -1,4 +1,4 @@
-import keras_core as keras
+import keras
 import numpy as np
 
 class KDMProjLayer(keras.layers.Layer):
