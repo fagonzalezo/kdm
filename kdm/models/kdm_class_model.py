@@ -11,6 +11,7 @@ class KDMClassModel(keras.Model):
                  encoder, 
                  n_comp, 
                  sigma=0.1,
+                 w_train=True,
                  **kwargs):
         super().__init__(**kwargs) 
         self.dim_y = dim_y
@@ -23,7 +24,8 @@ class KDMClassModel(keras.Model):
         self.kdm = KDMLayer(kernel=self.kernel, 
                                        dim_x=encoded_size,
                                        dim_y=dim_y, 
-                                       n_comp=n_comp)
+                                       n_comp=n_comp,
+                                       w_train=w_train)
     def call(self, input):
         encoded = self.encoder(input)
         rho_x = pure2dm(encoded)
