@@ -60,8 +60,8 @@ class MemRBFKernelLayer(RBFKernelLayer):
         Result:
             K: tensor of shape (bs, n, m)
         '''
-        A_norm = keras.ops.sum(A ** 2, axis=-1)[..., np.newaxis] ** 2 # shape (bs, n, 1)
-        B_norm = keras.ops.sum(B ** 2, axis=-1)[:, np.newaxis, :] ** 2 # shape (bs, 1, m)
+        A_norm = keras.ops.sum(A ** 2, axis=-1)[..., np.newaxis]  # shape (bs, n, 1)
+        B_norm = keras.ops.sum(B ** 2, axis=-1)[:, np.newaxis, :]  # shape (bs, 1, m)
         AB = keras.ops.matmul(A, keras.ops.transpose(B, [0, 2, 1])) 
         dist2 = A_norm + B_norm - 2. * AB # shape (bs, n, m)
         dist2 = keras.ops.clip(dist2, 0., np.inf)

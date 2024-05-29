@@ -1,3 +1,4 @@
 *.pyc
 .vscode/*
 kdm_test.ipynb
+best_model.weights.h5
