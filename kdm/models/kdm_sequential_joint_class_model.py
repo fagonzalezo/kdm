@@ -57,7 +57,6 @@ class KDMSequentialJointClassModel(keras.Model):
         ans = []
         idx = 0
         for seq in self.model:
-            print(idx)
             idx += 1
             if seq == 'merge':
                 merged_prbs = cartesian_product(ans)
@@ -70,7 +69,6 @@ class KDMSequentialJointClassModel(keras.Model):
                 rho_y = seq(rho_x)
                 probs = dm2discrete(rho_y)
                 ans.append(probs)
-        print(probs)
         return probs
 
     def init_components(self, samples_x, samples_y, init_sigma=False, sigma_mult=1, index=0, super_index=0):
