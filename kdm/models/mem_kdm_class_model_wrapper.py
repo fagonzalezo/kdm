@@ -31,9 +31,10 @@ class MemKDMClassModelWrapper:
             x_batch = x_batch[0]
             enc_batch = self.encoder(x_batch)
             enc_batch = keras.ops.convert_to_numpy(enc_batch)
+            enc_batch = np.float32(enc_batch)
             self.samples_x_enc[i:i+enc_batch.shape[0]] = enc_batch
             i += enc_batch.shape[0]
-        self.index = faiss.index_factory(encoded_size, index_type, faiss.METRIC_L2)
+        self.index = faiss.index_factory(encoded_size, index_type)
         self.index.train(self.samples_x_enc)
         self.index.add(self.samples_x_enc)
         #self.index = faiss.IndexFlatL2(encoded_size)  
