@@ -25,13 +25,12 @@ class MemKDMClassModelWrapper:
         samples_x = torch.tensor(samples_x, dtype=torch.float32, device='cpu')
         dataset = torch.utils.data.TensorDataset(samples_x)
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=32)
-        self.samples_x_enc = np.zeros((samples_x.shape[0], encoded_size))
+        self.samples_x_enc = np.zeros((samples_x.shape[0], encoded_size), dtype=np.float32)
         i = 0
         for x_batch in dataloader:
             x_batch = x_batch[0]
             enc_batch = self.encoder(x_batch)
             enc_batch = keras.ops.convert_to_numpy(enc_batch)
-            enc_batch = np.float32(enc_batch)
             self.samples_x_enc[i:i+enc_batch.shape[0]] = enc_batch
             i += enc_batch.shape[0]
         self.index = faiss.index_factory(encoded_size, index_type)
@@ -54,6 +53,7 @@ class MemKDMClassModelWrapper:
         for x_batch in dataloader:
             x_batch = x_batch[0]
             x_enc = self.encoder(x_batch)
+            x_enc = keras.ops.convert_to_numpy(x_enc)
             _, I = self.index.search(x_enc, self.n_comp)
             x_neigh = keras.ops.take(self.samples_x_enc, I, axis=0)
             y_neigh = keras.ops.take(self.samples_y, I, axis=0)
