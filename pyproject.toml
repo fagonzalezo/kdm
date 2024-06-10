@@ -10,7 +10,7 @@ authors = [
 ]
 description = "Probabilistic deep learning with kernel Density Matrices"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 keywords = ["machine learning", "density matrices", "deep learning"]
 license = {text = "GNU LGPL 2.1"}
 classifiers = [
