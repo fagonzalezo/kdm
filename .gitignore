@@ -1,3 +1,4 @@
 *.pyc
 .vscode/*
 kdm_test.ipynb
+*.weights.h5
