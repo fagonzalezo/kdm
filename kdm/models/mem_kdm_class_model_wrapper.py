@@ -24,7 +24,8 @@ class MemKDMClassModelWrapper:
         dataloader = TestDataset(samples_x, batch_size=32)
         self.samples_x_enc = np.zeros((samples_x.shape[0], encoded_size), dtype=np.float32)
         i = 0
-        for x_batch in dataloader:
+        for batch in range(len(dataloader)):
+            x_batch = dataloader[batch]
             enc_batch = self.encoder(x_batch)
             enc_batch = keras.ops.convert_to_numpy(enc_batch)
             self.samples_x_enc[i:i+enc_batch.shape[0]] = enc_batch
@@ -44,7 +45,8 @@ class MemKDMClassModelWrapper:
     def predict(self, X, batch_size=32):
         y_preds = []
         dataloader = TestDataset(X, batch_size=batch_size)
-        for x_batch in dataloader:
+        for batch in range(len(dataloader)):
+            x_batch = dataloader[batch]
             x_enc = self.encoder(x_batch)
             x_enc = keras.ops.convert_to_numpy(x_enc)
             _, I = self.index.search(x_enc, self.n_comp)
