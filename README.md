@@ -2,6 +2,21 @@
 
 Kernel Density Matrices (KDMs) are a generalization of density matrices used in quantum mechanics to represent the probabilistic state of a quantum system. KDMs provide a simpler yet effective mechanism for representing joint probability distributions of both continuous and discrete random variables. The framework allows for the construction of differentiable models for density estimation, inference, and sampling, enabling integration into end-to-end deep neural models. 
 
+# Getting Started
+
+You can install the most recent version of the library with
+
+```zsh
+pip install git+https://github.com/fagonzalezo/kdm.git
+```
+
+Memory based models require additionally the installation of the `faiss` library. You can install it with
+
+```zsh
+pip install faiss-cpu
+```
+
+Check our [examples](https://github.com/fagonzalezo/kdm/tree/master/examples) to see what you can do!
 ## Paper
 
 > **Kernel Density Matrices for Probabilistic Deep Learning**
