@@ -22,7 +22,7 @@ dependencies = [
     "scipy",
     "scikit-learn",
     "keras>=3.0.0",
-    "tensorflow-probability>=0.24.0",
+    "tensorflow-probability"
 ]
 
 
