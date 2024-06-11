@@ -1,9 +1,8 @@
 import keras
 import faiss
 import numpy as np
-from ..layers import MemRBFKernelLayer, MemKDMLayer
-from ..utils import pure2dm, dm2discrete
-from sklearn.metrics import pairwise_distances
+from ...layers import MemRBFKernelLayer, MemKDMLayer
+from ...utils import dm2discrete
 import tensorflow as tf
 
 class MemKDMClassModel(keras.Model):

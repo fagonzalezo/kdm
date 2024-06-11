@@ -2,8 +2,8 @@ import keras
 import math
 import faiss
 import numpy as np
-from ..models import MemKDMClassModel
-from ..utils import pure2dm, dm2discrete, dm2comp
+from ..mem import MemKDMClassModel
+from ...utils import dm2comp
 
 class MemKDMClassModelWrapper:
     def __init__(self,

@@ -2,3 +2,4 @@
 .vscode/*
 kdm_test.ipynb
 *.h5
+.env
