@@ -152,6 +152,7 @@ class TrainDataset(keras.utils.PyDataset):
         else:
             x_enc = self.mkdm_model.encoder(self.samples_x[low:high])
             n_comp = self.mkdm_model.n_comp
+        x_enc = keras.ops.convert_to_numpy(x_enc)
         _, I = self.mkdm_model.index.search(x_enc, n_comp)
         x_neigh = np.take(self.mkdm_model.samples_x_enc, I, axis=0)
         y_neigh = np.take(self.mkdm_model.samples_y, I, axis=0)
