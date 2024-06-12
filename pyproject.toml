@@ -21,8 +21,9 @@ dependencies = [
     "numpy",
     "scipy",
     "scikit-learn",
-    "keras>=3.0.0",
-    "tensorflow-probability"
+    "tensorflow-probability>=0.24",
+    "tensorflow>=2.16",
+    "tf-keras>=2.16",
 ]
 
 
