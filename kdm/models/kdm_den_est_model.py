@@ -2,6 +2,7 @@ import keras
 from ..layers import RBFKernelLayer, KDMProjLayer
 import numpy as np
 from sklearn.metrics import pairwise_distances
+import tensorflow_probability as tfp
 
 class KDMDenEstModel(keras.Model):
     def __init__(self,
@@ -31,3 +32,17 @@ class KDMDenEstModel(keras.Model):
             self.kernel.sigma.assign(sigma)
         self.kdmproj.c_x.assign(samples_x)
         self.kdmproj.c_w.assign(keras.ops.ones((self.n_comp,)) / self.n_comp)
+
+    def get_distrib(self):
+        comp_w = keras.ops.abs(self.kdmproj.c_w) + self.eps
+        comp_w = comp_w / keras.ops.sum(comp_w)
+        gm = tfp.distributions.MixtureSameFamily(
+            reparameterize=True,
+            mixture_distribution=tfp.distributions.Categorical(
+                                    probs=comp_w),
+            components_distribution=tfp.distributions.Independent( 
+                tfp.distributions.Normal(
+                    loc=self.kdmproj.c_x,  # component 2
+                    scale=self.kernel.sigma / np.sqrt(2.)),
+                    reinterpreted_batch_ndims=1))
+        return gm
