@@ -16,8 +16,8 @@ class KDMSequentialJointClassModel(keras.Model):
                  **kwargs):
         super().__init__(**kwargs)
         self.dim_y = dim_y
-        self.encoded_size = encoded_size
-        self.encoder = encoder
+        #self.encoded_size = encoded_size
+        #self.encoder = encoder
         self.n_comp = n_comp
         input = KDMLayer(kernel=
                          RBFKernelLayer(sigma=sigma,
@@ -50,7 +50,7 @@ class KDMSequentialJointClassModel(keras.Model):
         self.model = model_sequences
 
     def call(self, input):
-        encoded = self.encoder(input)
+        encoded = keras.layers.Identity()(input)
         rho_x = encoded
         rho_x = pure2dm(rho_x)
         rho_y = rho_x
@@ -72,7 +72,7 @@ class KDMSequentialJointClassModel(keras.Model):
         return probs
 
     def init_components(self, samples_x, samples_y, init_sigma=False, sigma_mult=1, index=0, super_index=0):
-        encoded_x = self.encoder(samples_x)
+        encoded_x = keras.layers.Identity()(samples_x)
         if init_sigma:
             np_encoded_x = keras.ops.convert_to_numpy(encoded_x)
             distances = pairwise_distances(np_encoded_x)
