@@ -45,7 +45,7 @@ class KDMGraphModel(keras.Model):
         
         # Setting the inputs to the graph
         for node, value in inputs.items():
-            node_outputs[node] = pure2dm(value)
+            node_outputs[node] = value
         
         # Processing nodes in topological order
         for node in nx.topological_sort(self.graph):
@@ -59,12 +59,10 @@ class KDMGraphModel(keras.Model):
                 input_data = [node_outputs[in_node] for in_node in input_nodes]
                 merged_prbs = cartesian_product(input_data)
                 rho_x = merged_prbs
-                print("merged probs")
-                print(merged_prbs)
                 rho_x = pure2dm(rho_x)
-                print(f"Node: {node}, rho_x shape: {rho_x.shape}, rho_x_values: {rho_x}")
             else:
                 rho_x = node_outputs[input_nodes[0]]
+                rho_x = pure2dm(rho_x)
             
             # Compute the output for this node
             rho_y = self.layers_dict[node](rho_x)
@@ -72,6 +70,7 @@ class KDMGraphModel(keras.Model):
         
         # Return the output of the final node
         final_node = list(self.graph.nodes)[-1]
+
         return node_outputs[final_node]
 
     def init_components(self, samples_x, samples_y, init_sigma=False, sigma_mult=1, node_name=None):
@@ -86,4 +85,4 @@ class KDMGraphModel(keras.Model):
         self.layers_dict[node_name].c_x.assign(encoded_x)
         self.layers_dict[node_name].c_y.assign(samples_y)
         self.layers_dict[node_name].c_w.assign(
-            keras.backend.ones((self.layers_dict[node_name].n_comp,)) / self.layers_dict[node_name].n_comp)
+            keras.ops.ones((self.layers_dict[node_name].n_comp,)) / self.layers_dict[node_name].n_comp)
