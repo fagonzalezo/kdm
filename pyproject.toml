@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kdm"
+version = "1.0.0"
+authors = [
+    {name = "Fabio A. González", email = "fagonzalezo@unal.edu.co"},
+]
+description = "Probabilistic deep learning with kernel Density Matrices"
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["machine learning", "density matrices", "deep learning"]
+license = {text = "GNU LGPL 2.1"}
+classifiers = [
+    "Framework :: Keras",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "tensorflow-probability>=0.24",
+    "tensorflow>=2.16",
+    "tf-keras>=2.16",
+]
+
+
+[project.optional-dependencies]
+faiss = ["faiss-cpu>=1.8.0"]
+
+[project.urls]
+Homepage = "https://github.com/fagonzalezo/kdm.git"
+Repository = "https://github.com/fagonzalezo/kdm.git"
+

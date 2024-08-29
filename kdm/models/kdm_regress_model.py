@@ -1,10 +1,10 @@
 import keras
 import numpy as np
 from ..layers import KDMLayer, RBFKernelLayer
-from ..utils import pure2dm, dm2discrete
+from ..utils import pure2dm, dm2discrete, dm2comp
 from sklearn.metrics import pairwise_distances
 
-class KDMClassModel(keras.Model):
+class KDMRegressModel(keras.Model):
     def __init__(self, 
                  encoded_size, 
                  dim_y, 
@@ -29,9 +29,10 @@ class KDMClassModel(keras.Model):
     def call(self, input):
         encoded = self.encoder(input)
         rho_x = pure2dm(encoded)
-        rho_y =self.kdm(rho_x)
-        probs = dm2discrete(rho_y)
-        return probs
+        rho_y = self.kdm(rho_x)
+        w, v = dm2comp(rho_y)
+        y = keras.ops.einsum('...j,...ji->...i', w, v)
+        return y
 
     def init_components(self, samples_x, samples_y, init_sigma=False, sigma_mult=1):
         encoded_x = self.encoder(samples_x)
