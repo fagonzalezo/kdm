@@ -70,6 +70,27 @@ def dm2discrete(dm):
     probs = keras.ops.clip(probs, 0., 1.)
     return probs
 
+def cartesian_product(x):
+    # x is a list of two tensors
+    if len(x) == 1:
+        return x[0]
+    elif len(x) == 2:
+        a, b = x
+        a = keras.ops.expand_dims(a, axis=-1)  # Shape: (batch_size, num_classes, 1)
+        b = keras.ops.expand_dims(b, axis=1)   # Shape: (batch_size, 1, num_classes)
+        return keras.ops.reshape(a * b, (keras.ops.shape(a)[0], -1))
+    else:
+        a, b = x[:2]
+        a = keras.ops.expand_dims(a, axis=-1)  # Shape: (batch_size, num_classes_a, 1)
+        b = keras.ops.expand_dims(b, axis=1)   # Shape: (batch_size, 1, num_classes_b)
+        ab = keras.ops.reshape(a * b, (keras.ops.shape(a)[0], -1))  # Shape: (batch_size, num_classes_a * num_classes_b)
+
+        for i in range(2, len(x)):
+            ab = keras.ops.expand_dims(ab, axis=-1)  # Shape: (batch_size, num_classes_ab, 1)
+            c = keras.ops.expand_dims(x[i], axis=1)  # Shape: (batch_size, 1, num_classes_c)
+            ab = keras.ops.reshape(ab * c, (keras.ops.shape(ab)[0], -1))  # Shape: (batch_size, num_classes_ab * num_classes_c)
+
+        return ab
 
 
 def pure_dm_overlap(x, dm, kernel):
