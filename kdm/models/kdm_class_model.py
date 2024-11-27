@@ -12,11 +12,15 @@ class KDMClassModel(keras.Model):
                  n_comp, 
                  sigma=0.1,
                  w_train=True,
+                 generative=0.,
                  **kwargs):
         super().__init__(**kwargs) 
         self.dim_y = dim_y
         self.encoded_size = encoded_size
+        self.generative = generative
         self.encoder = encoder
+        if generative > 0.:
+            encoder.trainable = False
         self.n_comp = n_comp
         self.kernel = RBFKernelLayer(sigma=sigma, 
                                          dim=encoded_size, 
@@ -25,7 +29,8 @@ class KDMClassModel(keras.Model):
                                        dim_x=encoded_size,
                                        dim_y=dim_y, 
                                        n_comp=n_comp,
-                                       w_train=w_train)
+                                       w_train=w_train,
+                                       generative=generative)
     def call(self, input):
         encoded = self.encoder(input)
         rho_x = pure2dm(encoded)

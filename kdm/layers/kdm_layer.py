@@ -43,6 +43,8 @@ class KDMLayer(keras.layers.Layer):
                        norm of the x components.
         l1_y: float. Coefficient of the regularization term penalizing the l1
                        norm of the y components.
+        generative: float. Coefficient of the loss term maximizing the likelihood of the
+                        input samples.
     """
     def __init__(
             self,
@@ -56,6 +58,7 @@ class KDMLayer(keras.layers.Layer):
             l1_x: float = 0.,
             l1_y: float = 0.,
             l1_act: float = 0.,
+            generative: float = 0.,
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -69,6 +72,7 @@ class KDMLayer(keras.layers.Layer):
         self.l1_x = l1_x
         self.l1_y = l1_y
         self.l1_act = l1_act
+        self.generative = generative
         self.c_x = self.add_weight(
             shape=(self.n_comp, self.dim_x),
             #initializer=keras.initializers.orthogonal(),
@@ -101,6 +105,11 @@ class KDMLayer(keras.layers.Layer):
         in_v = inputs[:, :, 1:] # shape (b, n_comp_in, dim_x)
         out_vw = self.kernel(in_v, self.c_x)  # shape (b, n_comp_in, n_comp)
         out_w = comp_w[np.newaxis, np.newaxis, :] * keras.ops.square(out_vw)
+        if self.generative != 0:
+            proj = keras.ops.einsum('...i,...ij->...', in_w, out_w) # shape (b, n_comp)
+            log_probs = (keras.ops.log(proj + self.eps)
+                     + self.kernel.log_weight())
+            self.add_loss(-self.generative * keras.ops.mean(log_probs))
         out_w = keras.ops.maximum(out_w, self.eps) 
         out_w_sum = keras.ops.sum(out_w, axis=2, keepdims=True) # shape (b, n_comp_in, 1)
         out_w = out_w / out_w_sum

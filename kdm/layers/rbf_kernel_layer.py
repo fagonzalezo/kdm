@@ -6,8 +6,7 @@ class RBFKernelLayer(keras.layers.Layer):
         '''
         Builds a layer that calculates the rbf kernel between two set of vectors
         Arguments:
-            sigma: RBF scale parameter. If it is a tf.Variable it will be used as is.
-                     Otherwise it will create a trainable variable with the given value.
+            sigma: RBF scale parameter.
         '''
         super().__init__(**kwargs)
         self.sigma = self.add_weight(
@@ -47,8 +46,7 @@ class MemRBFKernelLayer(RBFKernelLayer):
         '''
         Builds a layer that calculates the rbf kernel between two set of vectors
         Arguments:
-            sigma: RBF scale parameter. If it is a tf.Variable it will be used as is.
-                     Otherwise it will create a trainable variable with the given value.
+            sigma: RBF scale parameter. 
         '''
         super().__init__(sigma, dim, trainable, min_sigma, **kwargs)
 

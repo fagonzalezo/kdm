@@ -9,11 +9,12 @@ class KDMDenEstModel(keras.Model):
                  dim_x,
                  sigma,
                  n_comp,
+                 trainable_sigma=True,
                  **kwargs):
         super().__init__(**kwargs)
         self.dim_x = dim_x
         self.n_comp = n_comp
-        self.kernel = RBFKernelLayer(sigma, dim=dim_x)
+        self.kernel = RBFKernelLayer(sigma, trainable=trainable_sigma, dim=dim_x)
         self.kdmproj = KDMProjLayer(self.kernel,
                                 dim_x=dim_x,
                                 n_comp=n_comp)
