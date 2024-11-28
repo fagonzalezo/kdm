@@ -11,6 +11,7 @@ class KDMClassModel(keras.Model):
                  encoder, 
                  n_comp, 
                  sigma=0.1,
+                 sigma_trainable=True,
                  w_train=True,
                  generative=0.,
                  **kwargs):
@@ -24,7 +25,7 @@ class KDMClassModel(keras.Model):
         self.n_comp = n_comp
         self.kernel = RBFKernelLayer(sigma=sigma, 
                                          dim=encoded_size, 
-                                         trainable=True)
+                                         trainable=sigma_trainable)
         self.kdm = KDMLayer(kernel=self.kernel, 
                                        dim_x=encoded_size,
                                        dim_y=dim_y, 
