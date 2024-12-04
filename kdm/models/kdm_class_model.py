@@ -40,7 +40,7 @@ class KDMClassModel(keras.Model):
         return probs
 
     def init_components(self, samples_x, samples_y, init_sigma=False, sigma_mult=1):
-        encoded_x = self.encoder(samples_x)
+        encoded_x = self.encoder.predict(samples_x)
         if init_sigma:
             np_encoded_x = keras.ops.convert_to_numpy(encoded_x)
             distances = pairwise_distances(np_encoded_x)
