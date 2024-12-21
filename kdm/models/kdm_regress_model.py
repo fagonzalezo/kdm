@@ -44,7 +44,7 @@ class KDMRegressModel(keras.Model):
         encoded = self.encoder(input)
         rho_x = pure2dm(encoded)
         rho_y = self.kdm(rho_x)
-        return rho_y, keras.ops.broadcast_to(self.sigma_y, (keras.ops.shape(input)[0],1))
+        return rho_y
     
     def init_components(self, samples_x, samples_y, init_sigma=False, sigma_mult=1):
         encoded_x = self.encoder(samples_x)
@@ -58,8 +58,8 @@ class KDMRegressModel(keras.Model):
         self.kdm.c_w.assign(keras.ops.ones((self.n_comp,)) / self.n_comp)
 
     def loglik(self, y_true, y_pred):
-        rho_y, sigma_y = y_pred
-        return - keras.ops.mean(dm_rbf_loglik(y_true, rho_y, sigma_y))
+        rho_y = y_pred
+        return - keras.ops.mean(dm_rbf_loglik(y_true, rho_y, self.sigma_y / np.sqrt(2)))
 
     def compute_loss(self, x, y, y_pred, sample_weight, training=True):
         loss = self.loglik(y, y_pred)

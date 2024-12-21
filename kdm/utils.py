@@ -70,7 +70,7 @@ def dm2discrete(dm):
 
 def dm_rbf_loglik(x, dm, sigma):
     '''
-    Calculates the (non-normalized) log likelihood of a set of points x given a density 
+    Calculates the log likelihood of a set of points x given a density 
     matrix in a RKHS defined by a RBF kernel
     Arguments:
       x: tensor of shape (bs, d)
@@ -79,10 +79,15 @@ def dm_rbf_loglik(x, dm, sigma):
     Returns:
         log_likelihood: tensor with shape (bs, )
     '''
+    d = keras.ops.shape(x)[-1]
     w, v = dm2comp(dm) # Shape: (bs, n), (bs, n, d)
     dist = keras.ops.sum((x[:, np.newaxis, :] - v) ** 2, axis=-1) # Shape: (bs, n)
-    likelihood = keras.ops.einsum('...i,...i->...', w, keras.ops.exp(-dist / (2 * sigma ** 2) ** 2))
-    return keras.ops.log(likelihood + 1e-12)
+    log_likelihood =keras.ops.log( keras.ops.einsum('...i,...i->...', w, 
+                                     keras.ops.exp(-dist / (2 * sigma ** 2)) ** 2)
+                                     + 1e-12)
+    coeff = d * keras.ops.log(sigma + 1e-12) + d * np.log(4 * np.pi)
+    log_likelihood = log_likelihood - coeff              
+    return log_likelihood
 
 def dm_rbf_expectation(dm):
     '''
