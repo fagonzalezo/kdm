@@ -1,7 +1,7 @@
 import keras
 import numpy as np
 from ..layers import KDMLayer, RBFKernelLayer
-from ..utils import pure2dm, dm_rbf_loglik, gauss_entropy_lb
+from ..utils import pure2dm, dm_rbf_loglik, gauss_entropy_lb, dm2comp
 from sklearn.metrics import pairwise_distances
 
 
@@ -60,6 +60,28 @@ class KDMRegressModel(keras.Model):
     def loglik(self, y_true, y_pred):
         rho_y = y_pred
         return - keras.ops.mean(dm_rbf_loglik(y_true, rho_y, self.sigma_y / np.sqrt(2)))
+
+    def loglik_lb_1(self, y_true, y_pred):
+        sigma = self.sigma_y / np.sqrt(2)
+        d = keras.ops.shape(y_true)[-1]
+        w, v = dm2comp(y_pred) # Shape: (bs, n), (bs, n, d)
+        dist = keras.ops.sum((y_true[:, np.newaxis, :] - v) ** 2, axis=-1) # Shape: (bs, n)
+        log_likelihood = keras.ops.einsum('...i,...i->...', w, 
+                                     -dist / (2 * sigma ** 2))
+        coeff = d * keras.ops.log(sigma + 1e-12) + d * np.log(4 * np.pi)
+        log_likelihood = log_likelihood - coeff   
+        return - keras.ops.mean(log_likelihood)
+
+    def loglik_lb_2(self, y_true, y_pred):
+        sigma = self.sigma_y / np.sqrt(2)
+        d = keras.ops.shape(y_true)[-1]
+        w, v = dm2comp(y_pred) # Shape: (bs, n), (bs, n, d)
+        expectation = keras.ops.einsum('...i,...ij->...j', w, v)
+        dist = keras.ops.sum((y_true - expectation) ** 2, axis=-1) # Shape: (bs, 1)
+        log_likelihood = - dist / (2 * sigma ** 2) 
+        coeff = d * keras.ops.log(sigma + 1e-12) + d * np.log(4 * np.pi)
+        log_likelihood = log_likelihood - coeff   
+        return - keras.ops.mean(log_likelihood)
 
     def compute_loss(self, x, y, y_pred, sample_weight, training=True):
         loss = self.loglik(y, y_pred)
