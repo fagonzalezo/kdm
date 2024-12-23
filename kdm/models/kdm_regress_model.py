@@ -58,8 +58,8 @@ class KDMRegressModel(keras.Model):
         self.kdm.c_w.assign(keras.ops.ones((self.n_comp,)) / self.n_comp)
 
     def loglik(self, y_true, y_pred):
-        rho_y = y_pred
-        return - keras.ops.mean(dm_rbf_loglik(y_true, rho_y, self.sigma_y / np.sqrt(2)))
+        sigma = keras.ops.clip(self.sigma_y, self.kdm.kernel.min_sigma, np.inf) / np.sqrt(2)
+        return -keras.ops.mean(dm_rbf_loglik(y_true, y_pred, sigma))
 
     def loglik_lb_1(self, y_true, y_pred):
         sigma = self.sigma_y / np.sqrt(2)
