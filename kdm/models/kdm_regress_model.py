@@ -2,7 +2,7 @@ import keras
 import numpy as np
 from ..layers import KDMLayer, RBFKernelLayer
 from ..utils import pure2dm, dm_rbf_loglik, gauss_entropy_lb, dm2comp
-from sklearn.metrics import pairwise_distances
+from sklearn.neighbors import NearestNeighbors
 
 
 class KDMRegressModel(keras.Model):
@@ -50,8 +50,10 @@ class KDMRegressModel(keras.Model):
         encoded_x = self.encoder(samples_x)
         if init_sigma:
             np_encoded_x = keras.ops.convert_to_numpy(encoded_x)
-            distances = pairwise_distances(np_encoded_x)
-            sigma = np.mean(distances) * sigma_mult
+            nn_model = NearestNeighbors(n_neighbors=3)
+            nn_model.fit(np_encoded_x)
+            distances, _ = nn_model.kneighbors(np_encoded_x)
+            sigma = np.mean(distances[:, 2]) * sigma_mult
             self.kernel.sigma.assign(sigma)
         self.kdm.c_x.assign(encoded_x)
         self.kdm.c_y.assign(samples_y)

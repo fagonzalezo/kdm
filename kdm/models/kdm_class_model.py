@@ -2,7 +2,8 @@ import keras
 import numpy as np
 from ..layers import KDMLayer, RBFKernelLayer
 from ..utils import pure2dm, dm2discrete
-from sklearn.metrics import pairwise_distances
+from sklearn.neighbors import NearestNeighbors
+
 
 class KDMClassModel(keras.Model):
     def __init__(self, 
@@ -43,8 +44,10 @@ class KDMClassModel(keras.Model):
         encoded_x = self.encoder.predict(samples_x)
         if init_sigma:
             np_encoded_x = keras.ops.convert_to_numpy(encoded_x)
-            distances = pairwise_distances(np_encoded_x)
-            sigma = np.mean(distances) * sigma_mult
+            nn_model = NearestNeighbors(n_neighbors=3)
+            nn_model.fit(np_encoded_x)
+            distances, _ = nn_model.kneighbors(np_encoded_x)
+            sigma = np.mean(distances[:, 2]) * sigma_mult
             self.kernel.sigma.assign(sigma)
         self.kdm.c_x.assign(encoded_x)
         self.kdm.c_y.assign(samples_y)
