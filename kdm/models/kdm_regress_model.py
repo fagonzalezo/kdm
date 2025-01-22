@@ -1,7 +1,7 @@
 import keras
 import numpy as np
 from ..layers import KDMLayer, RBFKernelLayer
-from ..utils import pure2dm, dm_rbf_loglik, gauss_entropy_lb, dm2comp
+from ..utils import pure2dm, dm_rbf_loglik, gauss_entropy_lb, dm2comp, dm2discrete
 from sklearn.neighbors import NearestNeighbors
 
 
@@ -13,9 +13,13 @@ class KDMRegressModel(keras.Model):
                  n_comp, 
                  sigma_x=0.1,
                  sigma_y=0.1,
+                 min_sigma_y=1e-3,
+                 x_train=True,
+                 y_train=True,
                  w_train=True,
                  generative=0.,
                  entropy_reg_x=0.,
+                 sigma_x_trainable=True,
                  **kwargs):
         super().__init__(**kwargs) 
         self.dim_y = dim_y
@@ -27,11 +31,13 @@ class KDMRegressModel(keras.Model):
         self.n_comp = n_comp
         self.kernel = RBFKernelLayer(sigma=sigma_x, 
                                          dim=encoded_size, 
-                                         trainable=True)
+                                         trainable=sigma_x_trainable)
         self.kdm = KDMLayer(kernel=self.kernel, 
                                        dim_x=encoded_size,
                                        dim_y=dim_y, 
                                        n_comp=n_comp,
+                                       x_train=x_train,
+                                       y_train=y_train,
                                        w_train=w_train,
                                        generative=generative)
         self.sigma_y = self.add_weight(
@@ -39,6 +45,7 @@ class KDMRegressModel(keras.Model):
             initializer=keras.initializers.constant(sigma_y),
             trainable=True,
             name="sigma_y")
+        self.min_sigma_y = min_sigma_y
 
     def call(self, input):
         encoded = self.encoder(input)
@@ -60,8 +67,8 @@ class KDMRegressModel(keras.Model):
         self.kdm.c_w.assign(keras.ops.ones((self.n_comp,)) / self.n_comp)
 
     def loglik(self, y_true, y_pred):
-        sigma = keras.ops.clip(self.sigma_y, self.kdm.kernel.min_sigma, np.inf) / np.sqrt(2)
-        return -keras.ops.mean(dm_rbf_loglik(y_true, y_pred, sigma))
+        sigma_y = keras.ops.clip(self.sigma_y, self.min_sigma_y, np.inf)
+        return -keras.ops.mean(dm_rbf_loglik(y_true, y_pred, sigma_y))
 
     def loglik_lb_1(self, y_true, y_pred):
         sigma = self.sigma_y / np.sqrt(2)

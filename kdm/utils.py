@@ -85,7 +85,7 @@ def dm_rbf_loglik(x, dm, sigma):
     log_likelihood =keras.ops.log( keras.ops.einsum('...i,...i->...', w, 
                                      keras.ops.exp(-dist / (2 * sigma ** 2)) ** 2)
                                      + 1e-12)
-    coeff = d * keras.ops.log(sigma + 1e-12) + d * np.log(4 * np.pi)
+    coeff = d * keras.ops.log(sigma + 1e-12) + d * np.log(np.pi) / 2
     log_likelihood = log_likelihood - coeff              
     return log_likelihood
 
