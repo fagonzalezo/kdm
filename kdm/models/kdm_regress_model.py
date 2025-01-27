@@ -1,7 +1,7 @@
 import keras
 import numpy as np
 from ..layers import KDMLayer, RBFKernelLayer
-from ..utils import pure2dm, dm_rbf_loglik, gauss_entropy_lb, dm2comp, dm2discrete
+from ..utils import pure2dm, dm_rbf_loglik, gauss_entropy_lb, dm_rbf_expectation, dm_rbf_variance
 from sklearn.neighbors import NearestNeighbors
 
 
@@ -20,6 +20,7 @@ class KDMRegressModel(keras.Model):
                  generative=0.,
                  entropy_reg_x=0.,
                  sigma_x_trainable=True,
+                 sigma_y_trainable=True,
                  **kwargs):
         super().__init__(**kwargs) 
         self.dim_y = dim_y
@@ -43,7 +44,7 @@ class KDMRegressModel(keras.Model):
         self.sigma_y = self.add_weight(
             shape=(),
             initializer=keras.initializers.constant(sigma_y),
-            trainable=True,
+            trainable=sigma_y_trainable,
             name="sigma_y")
         self.min_sigma_y = min_sigma_y
 
@@ -52,6 +53,19 @@ class KDMRegressModel(keras.Model):
         rho_x = pure2dm(encoded)
         rho_y = self.kdm(rho_x)
         return rho_y
+    
+    def predict_reg(self, input, **kwargs):
+        rho_y = self.predict(input, **kwargs)
+        y_exp = keras.ops.convert_to_numpy(dm_rbf_expectation(rho_y))
+        sigma_y = keras.ops.clip(self.sigma_y, self.min_sigma_y, np.inf)
+        y_var = keras.ops.convert_to_numpy(dm_rbf_variance(rho_y, sigma_y))
+        return y_exp, y_var
+    
+    def get_sigmas(self):
+        sigma_y = keras.ops.convert_to_numpy(
+            keras.ops.clip(self.sigma_y, self.min_sigma_y, np.inf))
+        sigma_x = keras.ops.convert_to_numpy(self.kernel.sigma)
+        return sigma_x, sigma_y
     
     def init_components(self, samples_x, samples_y, init_sigma=False, sigma_mult=1):
         encoded_x = self.encoder(samples_x)
@@ -69,28 +83,6 @@ class KDMRegressModel(keras.Model):
     def loglik(self, y_true, y_pred):
         sigma_y = keras.ops.clip(self.sigma_y, self.min_sigma_y, np.inf)
         return -keras.ops.mean(dm_rbf_loglik(y_true, y_pred, sigma_y))
-
-    def loglik_lb_1(self, y_true, y_pred):
-        sigma = self.sigma_y / np.sqrt(2)
-        d = keras.ops.shape(y_true)[-1]
-        w, v = dm2comp(y_pred) # Shape: (bs, n), (bs, n, d)
-        dist = keras.ops.sum((y_true[:, np.newaxis, :] - v) ** 2, axis=-1) # Shape: (bs, n)
-        log_likelihood = keras.ops.einsum('...i,...i->...', w, 
-                                     -dist / (2 * sigma ** 2))
-        coeff = d * keras.ops.log(sigma + 1e-12) + d * np.log(4 * np.pi)
-        log_likelihood = log_likelihood - coeff   
-        return - keras.ops.mean(log_likelihood)
-
-    def loglik_lb_2(self, y_true, y_pred):
-        sigma = self.sigma_y / np.sqrt(2)
-        d = keras.ops.shape(y_true)[-1]
-        w, v = dm2comp(y_pred) # Shape: (bs, n), (bs, n, d)
-        expectation = keras.ops.einsum('...i,...ij->...j', w, v)
-        dist = keras.ops.sum((y_true - expectation) ** 2, axis=-1) # Shape: (bs, 1)
-        log_likelihood = - dist / (2 * sigma ** 2) 
-        coeff = d * keras.ops.log(sigma + 1e-12) + d * np.log(4 * np.pi)
-        log_likelihood = log_likelihood - coeff   
-        return - keras.ops.mean(log_likelihood)
 
     def compute_loss(self, x, y, y_pred, sample_weight, training=True):
         loss = self.loglik(y, y_pred)
