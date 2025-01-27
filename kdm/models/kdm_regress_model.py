@@ -68,7 +68,7 @@ class KDMRegressModel(keras.Model):
         return sigma_x, sigma_y
     
     def init_components(self, samples_x, samples_y, init_sigma=False, sigma_mult=1):
-        encoded_x = self.encoder(samples_x)
+        encoded_x = self.encoder.predict(samples_x)
         if init_sigma:
             np_encoded_x = keras.ops.convert_to_numpy(encoded_x)
             nn_model = NearestNeighbors(n_neighbors=3)
