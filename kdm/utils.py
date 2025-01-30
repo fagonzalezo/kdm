@@ -115,6 +115,9 @@ def dm_rbf_variance(dm, sigma):
         variance_trace: tensor of shape (bs,)
             The sum of variances along each dimension for each batch element.
     '''
+    # adjust sigma  to account for the fact that the kernel is squared
+    sigma = sigma / np.sqrt(2)
+    
     w, v = dm2comp(dm)  # w: (bs, n), v: (bs, n, d)
     d = keras.ops.shape(v)[-1]
 
