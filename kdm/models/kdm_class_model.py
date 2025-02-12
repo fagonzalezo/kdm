@@ -15,6 +15,7 @@ class KDMClassModel(keras.Model):
                  sigma_trainable=True,
                  w_train=True,
                  generative=0.,
+                 min_sigma=1e-3,
                  **kwargs):
         super().__init__(**kwargs) 
         self.dim_y = dim_y
@@ -26,7 +27,8 @@ class KDMClassModel(keras.Model):
         self.n_comp = n_comp
         self.kernel = RBFKernelLayer(sigma=sigma, 
                                          dim=encoded_size, 
-                                         trainable=sigma_trainable)
+                                         trainable=sigma_trainable,
+                                         min_sigma=min_sigma)
         self.kdm = KDMLayer(kernel=self.kernel, 
                                        dim_x=encoded_size,
                                        dim_y=dim_y, 
