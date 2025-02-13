@@ -33,8 +33,9 @@ class RBFKernelLayer(keras.layers.Layer):
         AB = keras.ops.reshape(AB, [shape_A[0], shape_A[1], shape_B[0]])
         dist2 = A_norm + B_norm - 2. * AB
         dist2 = keras.ops.clip(dist2, 0., np.inf)
-        sigma = keras.ops.clip(self.sigma, self.min_sigma, np.inf)
-        K = keras.ops.exp(-dist2 / (2. * sigma ** 2.)) 
+        #sigma = keras.ops.clip(self.sigma, self.min_sigma, np.inf)
+        self.sigma.assign(keras.ops.clip(self.sigma, self.min_sigma, np.inf))
+        K = keras.ops.exp(-dist2 / (2. * self.sigma ** 2.)) 
         return K
     
     def log_weight(self):

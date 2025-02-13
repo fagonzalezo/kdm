@@ -13,9 +13,9 @@ class KDMClassModel(keras.Model):
                  n_comp, 
                  sigma=0.1,
                  sigma_trainable=True,
+                 min_sigma=1e-3, 
                  w_train=True,
                  generative=0.,
-                 min_sigma=1e-3,
                  **kwargs):
         super().__init__(**kwargs) 
         self.dim_y = dim_y

@@ -102,11 +102,12 @@ class KDMLayer(keras.layers.Layer):
         # normalize comp_w to sum to 1
         comp_w_sum = keras.ops.clip(keras.ops.sum(comp_w), 
                                     self.eps, np.inf)
-        comp_w = comp_w / comp_w_sum
+        # comp_w = comp_w / comp_w_sum
+        self.c_w.assign(comp_w / comp_w_sum)
         in_w = inputs[:, :, 0]  # shape (b, n_comp_in)
         in_v = inputs[:, :, 1:] # shape (b, n_comp_in, dim_x)
         out_vw = self.kernel(in_v, self.c_x)  # shape (b, n_comp_in, n_comp)
-        out_w = comp_w[np.newaxis, np.newaxis, :] * keras.ops.square(out_vw)
+        out_w = self.c_w[np.newaxis, np.newaxis, :] * keras.ops.square(out_vw)
         if self.generative != 0:
             proj = keras.ops.einsum('...i,...ij->...', in_w, out_w) # shape (b, n_comp)
             log_probs = (keras.ops.log(proj + self.eps)

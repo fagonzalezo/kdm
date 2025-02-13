@@ -12,6 +12,7 @@ class KDMRegressModel(keras.Model):
                  encoder, 
                  n_comp, 
                  sigma_x=0.1,
+                 min_sigma_x=1e-3,
                  sigma_y=0.1,
                  min_sigma_y=1e-3,
                  x_train=True,
@@ -32,7 +33,8 @@ class KDMRegressModel(keras.Model):
         self.n_comp = n_comp
         self.kernel = RBFKernelLayer(sigma=sigma_x, 
                                          dim=encoded_size, 
-                                         trainable=sigma_x_trainable)
+                                         trainable=sigma_x_trainable,
+                                         min_sigma=min_sigma_x)
         self.kdm = KDMLayer(kernel=self.kernel, 
                                        dim_x=encoded_size,
                                        dim_y=dim_y, 
@@ -52,13 +54,13 @@ class KDMRegressModel(keras.Model):
         encoded = self.encoder(input)
         rho_x = pure2dm(encoded)
         rho_y = self.kdm(rho_x)
+        self.sigma_y.assign(keras.ops.clip(self.sigma_y, self.min_sigma_y, np.inf))
         return rho_y
     
     def predict_reg(self, input, **kwargs):
         rho_y = self.predict(input, **kwargs)
         y_exp = keras.ops.convert_to_numpy(dm_rbf_expectation(rho_y))
-        sigma_y = keras.ops.clip(self.sigma_y, self.min_sigma_y, np.inf)
-        y_var = keras.ops.convert_to_numpy(dm_rbf_variance(rho_y, sigma_y))
+        y_var = keras.ops.convert_to_numpy(dm_rbf_variance(rho_y, self.sigma_y))
         return y_exp, y_var
     
     def get_sigmas(self):
@@ -81,8 +83,7 @@ class KDMRegressModel(keras.Model):
         self.kdm.c_w.assign(keras.ops.ones((self.n_comp,)) / self.n_comp)
 
     def loglik(self, y_true, y_pred):
-        sigma_y = keras.ops.clip(self.sigma_y, self.min_sigma_y, np.inf)
-        return -keras.ops.mean(dm_rbf_loglik(y_true, y_pred, sigma_y))
+        return -keras.ops.mean(dm_rbf_loglik(y_true, y_pred,self.sigma_y))
 
     def compute_loss(self, x, y, y_pred, sample_weight, training=True):
         loss = self.loglik(y, y_pred)
