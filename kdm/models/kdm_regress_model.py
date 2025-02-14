@@ -64,8 +64,7 @@ class KDMRegressModel(keras.Model):
         return y_exp, y_var
     
     def get_sigmas(self):
-        sigma_y = keras.ops.convert_to_numpy(
-            keras.ops.clip(self.sigma_y, self.min_sigma_y, np.inf))
+        sigma_y = keras.ops.convert_to_numpy(self.sigma_y)
         sigma_x = keras.ops.convert_to_numpy(self.kernel.sigma)
         return sigma_x, sigma_y
     
