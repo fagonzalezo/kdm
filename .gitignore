@@ -4,3 +4,4 @@ kdm_test.ipynb
 *.h5
 .env
 examples/kdm_binary_continous_regress.ipynb
+.DS_Store
