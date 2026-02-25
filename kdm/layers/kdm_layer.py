@@ -90,7 +90,7 @@ class KDMLayer(keras.layers.Layer):
             initializer=keras.initializers.constant(1./self.n_comp),
             trainable=self.w_train,
             name="c_w") 
-        self.eps = keras.config.epsilon()
+        self.eps = 1e-12
 
     def call(self, inputs):        
         # Weight regularizers
@@ -98,21 +98,24 @@ class KDMLayer(keras.layers.Layer):
             self.add_loss(self.l1_x * l1_loss(self.c_x))
         if self.l1_y != 0:
             self.add_loss(self.l1_y * l1_loss(self.c_y))
-        comp_w = keras.ops.abs(self.c_w) + self.eps
+        comp_w = keras.ops.abs(self.c_w)
         # normalize comp_w to sum to 1
-        comp_w = comp_w / keras.ops.sum(comp_w)
+        comp_w_sum = keras.ops.clip(keras.ops.sum(comp_w), 
+                                    self.eps, np.inf)
+        # comp_w = comp_w / comp_w_sum
+        self.c_w.assign(comp_w / comp_w_sum)
         in_w = inputs[:, :, 0]  # shape (b, n_comp_in)
         in_v = inputs[:, :, 1:] # shape (b, n_comp_in, dim_x)
         out_vw = self.kernel(in_v, self.c_x)  # shape (b, n_comp_in, n_comp)
-        out_w = comp_w[np.newaxis, np.newaxis, :] * keras.ops.square(out_vw)
+        out_w = self.c_w[np.newaxis, np.newaxis, :] * keras.ops.square(out_vw)
         if self.generative != 0:
             proj = keras.ops.einsum('...i,...ij->...', in_w, out_w) # shape (b, n_comp)
             log_probs = (keras.ops.log(proj + self.eps)
                      + self.kernel.log_weight())
-            self.add_loss(-self.generative * keras.ops.mean(log_probs))
+            self.add_loss(-self.generative * keras.ops.mean(log_probs)) 
         out_w = keras.ops.maximum(out_w, self.eps) 
         out_w_sum = keras.ops.sum(out_w, axis=2, keepdims=True) # shape (b, n_comp_in, 1)
-        out_w = out_w / out_w_sum
+        out_w = out_w / out_w_sum # shape (b, n_comp_in, n_comp)
         out_w = keras.ops.einsum('...i,...ij->...j', in_w, out_w) # shape (b, n_comp)
         if self.l1_act != 0:
             self.add_loss(self.l1_act * l1_loss(out_w))
