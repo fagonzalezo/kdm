@@ -54,7 +54,8 @@ class KDMRegressModel(keras.Model):
         encoded = self.encoder(input)
         rho_x = pure2dm(encoded)
         rho_y = self.kdm(rho_x)
-        self.sigma_y.assign(keras.ops.clip(self.sigma_y, self.min_sigma_y, np.inf))
+        if self.sigma_y.trainable:
+            self.sigma_y.assign(keras.ops.clip(self.sigma_y, self.min_sigma_y, np.inf))
         return rho_y
     
     def predict_reg(self, input, **kwargs):
