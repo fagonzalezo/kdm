@@ -40,7 +40,8 @@ class RBFKernelLayer(keras.layers.Layer):
     
     def log_weight(self):
         sigma = keras.ops.clip(self.sigma, self.min_sigma, np.inf)
-        return - self.dim * keras.ops.log(sigma + 1e-12) - self.dim * np.log(4 * np.pi) 
+        # return - self.dim * keras.ops.log(sigma + 1e-12) - self.dim * np.log(4 * np.pi) 
+        return - self.dim * keras.ops.log(sigma + 1e-12) - self.dim * np.log(np.pi) / 2
 
 class MemRBFKernelLayer(RBFKernelLayer):
     def __init__(self, sigma, dim, trainable=True, min_sigma=1e-3, **kwargs):
