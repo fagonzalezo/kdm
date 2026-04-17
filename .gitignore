@@ -7,3 +7,6 @@ examples/kdm_binary_continous_regress.ipynb
 .DS_Store
 test_generative_regress.ipynb
 *.pdf
+
+.claude/CLAUDE.md
+.claude/settings.local.json
