@@ -1,4 +1,6 @@
 *.pyc
+*.egg-info/
+__pycache__/
 .vscode/*
 kdm_test.ipynb
 *.h5
