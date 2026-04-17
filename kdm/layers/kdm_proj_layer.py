@@ -1,70 +1,52 @@
-import keras
-import numpy as np
+import torch
+import torch.nn as nn
 
-class KDMProjLayer(keras.layers.Layer):
-    """Kernel Density Matrix projection layer
-    Receives as input a vector and calculates its projection over the 
-    layer KDM.
+
+class KDMProjLayer(nn.Module):
+    """Kernel Density Matrix projection layer.
+
+    Projects an input vector onto the layer's KDM support points using the
+    supplied kernel; returns a scalar weight per batch element that can be
+    interpreted (up to the kernel's log_weight normalization) as an
+    unnormalized density estimate.
+
     Input shape:
         (batch_size, dim_x)
-        where dim_x is the dimension of the input state
     Output shape:
-        (batch_size, )
+        (batch_size,)
+
     Arguments:
-        kernel: a kernel layer
-        dim_x: int. the dimension of the input state
-        x_train: bool. Whether to train the or not the compoments of the train
-                       KDM
-        w_train: bool. Whether to train the or not the weights of the compoments 
-                       of the train KDM
-        n_comp: int. Number of components used to represent 
-                 the train KDM
+        kernel: a Kernel module with forward(A, B) and log_weight().
+        dim_x: dimensionality of the input state.
+        x_train: whether to train the support components.
+        w_train: whether to train the component weights.
+        n_comp: number of components representing the layer KDM.
     """
 
     def __init__(
-            self,
-            kernel,
-            dim_x: int,
-            x_train: bool = True,
-            w_train: bool = True,
-            n_comp: int = 0, 
-            **kwargs
+        self,
+        kernel,
+        dim_x: int,
+        x_train: bool = True,
+        w_train: bool = True,
+        n_comp: int = 0,
     ):
-        super().__init__(**kwargs)
+        super().__init__()
         self.kernel = kernel
         self.dim_x = dim_x
         self.x_train = x_train
         self.w_train = w_train
         self.n_comp = n_comp
-        self.c_x = self.add_weight(
-            shape=(self.n_comp, self.dim_x),
-            #initializer=tf.keras.initializers.orthogonal(),
-            initializer=keras.initializers.random_normal(),
-            trainable=self.x_train,
-            name="c_x")
-        self.c_w = self.add_weight(
-            shape=(self.n_comp,),
-            initializer=keras.initializers.constant(1./self.n_comp),
-            trainable=self.w_train,
-            name="c_w")
-        self.eps = keras.config.epsilon() 
+        self.eps = 1e-7  # matches keras.config.epsilon()
 
-    def call(self, inputs):
-        comp_w = keras.ops.abs(self.c_w) + self.eps
-        # normalize comp_w to sum to 1
-        comp_w = comp_w / keras.ops.sum(comp_w)
-        in_v = inputs[:, np.newaxis, :]
-        out_vw = self.kernel(in_v, self.c_x) ** 2 # shape (b, 1, n_comp)
-        out_w = keras.ops.einsum('...j,...ij->...', comp_w, out_vw)
-        return out_w
+        c_x = torch.randn(n_comp, dim_x) * 0.05  # matches keras.initializers.random_normal default
+        c_w = torch.full((n_comp,), 1.0 / n_comp)
+        self.c_x = nn.Parameter(c_x, requires_grad=x_train)
+        self.c_w = nn.Parameter(c_w, requires_grad=w_train)
 
-    def get_config(self):
-        config = {
-            "dim_x": self.dim_x,
-            "n_comp": self.n_comp,
-            "x_train": self.x_train,
-            "w_train": self.w_train,
-        }
-        base_config = super().get_config()
-        return {**base_config, **config}
-
+    def forward(self, inputs):
+        comp_w = self.c_w.abs() + self.eps
+        comp_w = comp_w / comp_w.sum()
+        in_v = inputs.unsqueeze(1)  # (bs, 1, dim_x)
+        out_vw = self.kernel(in_v, self.c_x) ** 2  # (bs, 1, n_comp)
+        return torch.einsum('...j,...ij->...', comp_w, out_vw)  # (bs,)

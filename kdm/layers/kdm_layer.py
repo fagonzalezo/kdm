@@ -1,67 +1,46 @@
-import keras
-import numpy as np
+import math
 
-def l1_loss(vals):
-    '''
-    Calculate the l1 loss for a batch of vectors
-    Arguments:
-        vals: tensor with shape (b_size, n)
-    '''
-    b_size = keras.ops.cast(keras.ops.shape(vals)[0], dtype=keras.float32)
-    vals = keras.utils.normalize(vals, order=2, axis=1)
-    loss = keras.ops.sum(keras.ops.abs(vals)) / b_size
-    return loss
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-class KDMLayer(keras.layers.Layer):
-    """Kernel Density Matrix Layer
-    Receives as input a KDM represented by a set of vectors
-    and weight values. 
-    Returns a resulting KDM.
+
+class KDMLayer(nn.Module):
+    """Kernel Density Matrix Layer.
+
+    Maps an input KDM to an output KDM via a learned joint KDM.
+
     Input shape:
         (batch_size, n_comp_in, dim_x + 1)
-        where dim_x is the dimension of the input state
-        and n_comp_in is the number of components of the input KDM. 
-        The weights of the input KDM of sample i are [i, :, 0], 
-        and the components are [i, :, 1:dim_x + 1].
+        where [:, :, 0] are the input component weights and [:, :, 1:] are
+        the input component vectors.
     Output shape:
-        (batch_size, n_comp, dim_y)
-        where 
-            dim_y: the dimension of the output state
-            n_comp: the number of components of the joint KDM
-        The weights of the output KDM for sample i are [i, :, 0], 
-        and the components are [i, :, 1:dim_y + 1].
+        (batch_size, n_comp, dim_y + 1)
+        with the same weight/vector layout.
+
     Arguments:
-        dim_x: int. the dimension of the input state
-        dim_y: int. the dimension of the output state
-        x_train: bool. Whether to train or not the x compoments of the joint KDM.
-        x_train: bool. Whether to train or not the y compoments of the joint KDM.
-        w_train: bool. Whether to train or not the weights of the joint KDM.
-        n_comp: int. Number of components used to represent the joint KDM.
-        l1_act: float. Coefficient of the regularization term penalizing the l1
-                       norm of the activations.
-        l1_x: float. Coefficient of the regularization term penalizing the l1
-                       norm of the x components.
-        l1_y: float. Coefficient of the regularization term penalizing the l1
-                       norm of the y components.
-        generative: float. Coefficient of the loss term maximizing the likelihood of the
-                        input samples.
+        kernel: a Kernel module with forward(A, B) and log_weight().
+        dim_x: dimensionality of the input state.
+        dim_y: dimensionality of the output state.
+        n_comp: number of components representing the joint KDM.
+        x_train / y_train / w_train: whether to train each component tensor.
+
+    Regularization and the generative log-likelihood are not applied inside
+    forward; compute them explicitly in the training loop using `log_marginal`
+    and parameter-wise L1 helpers in `kdm.losses`.
     """
+
     def __init__(
-            self,
-            kernel,
-            dim_x: int,
-            dim_y: int,
-            x_train: bool = True,
-            y_train: bool = True,
-            w_train: bool = True,
-            n_comp: int = 0, 
-            l1_x: float = 0.,
-            l1_y: float = 0.,
-            l1_act: float = 0.,
-            generative: float = 0.,
-            **kwargs
+        self,
+        kernel,
+        dim_x: int,
+        dim_y: int,
+        x_train: bool = True,
+        y_train: bool = True,
+        w_train: bool = True,
+        n_comp: int = 0,
     ):
-        super().__init__(**kwargs)
+        super().__init__()
         self.kernel = kernel
         self.dim_x = dim_x
         self.dim_y = dim_y
@@ -69,76 +48,49 @@ class KDMLayer(keras.layers.Layer):
         self.y_train = y_train
         self.w_train = w_train
         self.n_comp = n_comp
-        self.l1_x = l1_x
-        self.l1_y = l1_y
-        self.l1_act = l1_act
-        self.generative = generative
-        self.c_x = self.add_weight(
-            shape=(self.n_comp, self.dim_x),
-            #initializer=keras.initializers.orthogonal(),
-            initializer=keras.initializers.random_normal(),
-            trainable=self.x_train,
-            name="c_x")
-        self.c_y = self.add_weight(
-            shape=(self.n_comp, self.dim_y),
-            initializer=keras.initializers.Constant(np.sqrt(1./self.dim_y)),
-            #initializer=keras.initializers.random_normal(),
-            trainable=self.y_train,
-            name="c_y")
-        self.c_w = self.add_weight(
-            shape=(self.n_comp,),
-            initializer=keras.initializers.constant(1./self.n_comp),
-            trainable=self.w_train,
-            name="c_w") 
         self.eps = 1e-12
 
-    def call(self, inputs):        
-        # Weight regularizers
-        if self.l1_x != 0:
-            self.add_loss(self.l1_x * l1_loss(self.c_x))
-        if self.l1_y != 0:
-            self.add_loss(self.l1_y * l1_loss(self.c_y))
-        comp_w = keras.ops.abs(self.c_w)
-        # normalize comp_w to sum to 1
-        comp_w_sum = keras.ops.clip(keras.ops.sum(comp_w), 
-                                    self.eps, np.inf)
-        # comp_w = comp_w / comp_w_sum
-        self.c_w.assign(comp_w / comp_w_sum)
-        in_w = inputs[:, :, 0]  # shape (b, n_comp_in)
-        in_v = inputs[:, :, 1:] # shape (b, n_comp_in, dim_x)
-        out_vw = self.kernel(in_v, self.c_x)  # shape (b, n_comp_in, n_comp)
-        out_w = self.c_w[np.newaxis, np.newaxis, :] * keras.ops.square(out_vw)
-        if self.generative != 0:
-            proj = keras.ops.einsum('...i,...ij->...', in_w, out_w) # shape (b, n_comp)
-            log_probs = (keras.ops.log(proj + self.eps)
-                     + self.kernel.log_weight())
-            self.add_loss(-self.generative * keras.ops.mean(log_probs)) 
-        out_w = keras.ops.maximum(out_w, self.eps) 
-        out_w_sum = keras.ops.sum(out_w, axis=2, keepdims=True) # shape (b, n_comp_in, 1)
-        out_w = out_w / out_w_sum # shape (b, n_comp_in, n_comp)
-        out_w = keras.ops.einsum('...i,...ij->...j', in_w, out_w) # shape (b, n_comp)
-        if self.l1_act != 0:
-            self.add_loss(self.l1_act * l1_loss(out_w))
-        out_w = keras.ops.expand_dims(out_w, axis=-1) # shape (b, n_comp, 1)
-        b_size = keras.ops.shape(out_w)[0]
-        out_y = keras.ops.broadcast_to(self.c_y[np.newaxis, ...], 
-                                       [b_size, self.n_comp, self.dim_y])
-        out = keras.ops.concatenate((out_w, out_y), 2)
-        return out
+        c_x = torch.randn(n_comp, dim_x) * 0.05  # matches keras.initializers.random_normal default
+        c_y = torch.full((n_comp, dim_y), math.sqrt(1.0 / dim_y))
+        c_w = torch.full((n_comp,), 1.0 / n_comp)
+        self.c_x = nn.Parameter(c_x, requires_grad=x_train)
+        self.c_y = nn.Parameter(c_y, requires_grad=y_train)
+        self.c_w = nn.Parameter(c_w, requires_grad=w_train)
 
-    def get_config(self):
-        config = {
-            "dim_x": self.dim_x,
-            "dim_y": self.dim_y,
-            "n_comp": self.n_comp,
-            "x_train": self.x_train,
-            "y_train": self.y_train,
-            "w_train": self.w_train,
-            "l1_x": self.l1_x,
-            "l1_y": self.l1_y,
-            "l1_act": self.l1_act,
-        }
-        base_config = super().get_config()
-        return {**base_config, **config}
+    def _normalized_comp_w(self) -> torch.Tensor:
+        comp_w = self.c_w.abs()
+        return comp_w / comp_w.sum().clamp(min=self.eps)
 
-  
+    def _compute_mixture(self, rho_in):
+        """Shared intermediate used by forward and log_marginal.
+
+        Returns:
+            in_w:  (bs, n_comp_in)
+            out_w: (bs, n_comp_in, n_comp) — unnormalized joint weights
+        """
+        in_w = rho_in[:, :, 0]
+        in_v = rho_in[:, :, 1:]
+        comp_w = self._normalized_comp_w()
+        out_vw = self.kernel(in_v, self.c_x)                     # (bs, n_comp_in, n_comp)
+        out_w = comp_w.view(1, 1, -1) * out_vw.square()          # (bs, n_comp_in, n_comp)
+        return in_w, out_w
+
+    def forward(self, rho_in):
+        in_w, out_w = self._compute_mixture(rho_in)
+        out_w = out_w.clamp(min=self.eps)
+        out_w = out_w / out_w.sum(dim=2, keepdim=True)           # (bs, n_comp_in, n_comp)
+        out_w = torch.einsum('...i,...ij->...j', in_w, out_w)    # (bs, n_comp)
+        out_w = out_w.unsqueeze(-1)                              # (bs, n_comp, 1)
+        out_y = self.c_y.unsqueeze(0).expand(out_w.shape[0], -1, -1)
+        return torch.cat((out_w, out_y), dim=2)
+
+    def log_marginal(self, rho_in):
+        """Log-likelihood of the input under the layer's marginal KDM over x.
+
+        Used as the `generative` term when training conditional generative
+        models. Returns a tensor of shape (batch_size,) that the caller
+        typically means-reduces into the loss.
+        """
+        in_w, out_w = self._compute_mixture(rho_in)
+        proj = torch.einsum('...i,...ij->...', in_w, out_w)      # (bs,) — summed over n_comp
+        return torch.log(proj + self.eps) + self.kernel.log_weight()

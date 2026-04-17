@@ -1,70 +1,95 @@
-import keras
-import numpy as np
+import math
 
-class RBFKernelLayer(keras.layers.Layer):
-    def __init__(self, sigma, dim, trainable=True, min_sigma=1e-3, **kwargs):
-        '''
-        Builds a layer that calculates the rbf kernel between two set of vectors
-        Arguments:
-            sigma: RBF scale parameter.
-        '''
-        super().__init__(**kwargs)
-        self.sigma = self.add_weight(
-            shape=(),
-            initializer=keras.initializers.Constant(value=sigma),
-            trainable=trainable)
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from ..base import Kernel
+
+
+def _softplus_inv(y: torch.Tensor) -> torch.Tensor:
+    # inverse of softplus: log(exp(y) - 1), numerically stable for y > 0
+    return torch.log(torch.expm1(y))
+
+
+class RBFKernelLayer(Kernel):
+    """RBF (Gaussian) kernel with a trainable, strictly positive bandwidth.
+
+    sigma is parameterized as `softplus(raw_sigma) + min_sigma`, which keeps
+    it positive without any per-step clamping. Direct assignment (via the
+    property setter) inverts softplus so that `kernel.sigma = new_value`
+    behaves intuitively at initialization time.
+
+    Arguments:
+        sigma: initial value of the RBF scale parameter (must be > min_sigma).
+        dim: dimensionality of the input vectors (used by `log_weight`).
+        trainable: whether sigma is learnable.
+        min_sigma: lower bound enforced structurally via the softplus offset.
+    """
+
+    def __init__(self, sigma, dim, trainable=True, min_sigma=1e-3):
+        super().__init__()
         self.dim = dim
         self.min_sigma = min_sigma
+        sigma_t = torch.as_tensor(float(sigma))
+        if sigma_t <= min_sigma:
+            raise ValueError(
+                f"Initial sigma ({float(sigma_t):g}) must be > min_sigma ({min_sigma:g})"
+            )
+        raw = _softplus_inv(sigma_t - min_sigma)
+        self.raw_sigma = nn.Parameter(raw, requires_grad=trainable)
 
-    def call(self, A, B):
-        '''
-        Input:
+    @property
+    def sigma(self) -> torch.Tensor:
+        return F.softplus(self.raw_sigma) + self.min_sigma
+
+    @sigma.setter
+    def sigma(self, value) -> None:
+        with torch.no_grad():
+            value_t = torch.as_tensor(value, dtype=self.raw_sigma.dtype,
+                                      device=self.raw_sigma.device)
+            if (value_t <= self.min_sigma).any():
+                raise ValueError(
+                    f"Assigned sigma must be > min_sigma ({self.min_sigma:g})"
+                )
+            self.raw_sigma.copy_(_softplus_inv(value_t - self.min_sigma))
+
+    def forward(self, A, B):
+        """
+        Arguments:
             A: tensor of shape (bs, n, d)
             B: tensor of shape (m, d)
-        Result:
+        Returns:
             K: tensor of shape (bs, n, m)
-        '''
-        shape_A = keras.ops.shape(A)
-        shape_B = keras.ops.shape(B)
-        A_norm = keras.ops.sum(A ** 2, axis=-1)[..., np.newaxis]
-        B_norm = keras.ops.sum(B ** 2, axis=-1)[np.newaxis, np.newaxis, :]
-        A_reshaped = keras.ops.reshape(A, [-1, shape_A[2]])
-        AB = keras.ops.matmul(A_reshaped, keras.ops.transpose(B)) 
-        AB = keras.ops.reshape(AB, [shape_A[0], shape_A[1], shape_B[0]])
-        dist2 = A_norm + B_norm - 2. * AB
-        dist2 = keras.ops.clip(dist2, 0., np.inf)
-        #sigma = keras.ops.clip(self.sigma, self.min_sigma, np.inf)
-        self.sigma.assign(keras.ops.clip(self.sigma, self.min_sigma, np.inf))
-        K = keras.ops.exp(-dist2 / (2. * self.sigma ** 2.)) 
-        return K
-    
+        """
+        # (bs, n, d) x (d, m) -> (bs, n, m); torch.matmul broadcasts
+        AB = torch.matmul(A, B.transpose(-1, -2))
+        A_norm = (A ** 2).sum(dim=-1, keepdim=True)  # (bs, n, 1)
+        B_norm = (B ** 2).sum(dim=-1).unsqueeze(0).unsqueeze(0)  # (1, 1, m)
+        dist2 = (A_norm + B_norm - 2.0 * AB).clamp(min=0.0)
+        return torch.exp(-dist2 / (2.0 * self.sigma ** 2))
+
     def log_weight(self):
-        sigma = keras.ops.clip(self.sigma, self.min_sigma, np.inf)
-        # return - self.dim * keras.ops.log(sigma + 1e-12) - self.dim * np.log(4 * np.pi) 
-        return - self.dim * keras.ops.log(sigma + 1e-12) - self.dim * np.log(np.pi) / 2
+        return -self.dim * torch.log(self.sigma + 1e-12) - self.dim * math.log(math.pi) / 2
+
 
 class MemRBFKernelLayer(RBFKernelLayer):
-    def __init__(self, sigma, dim, trainable=True, min_sigma=1e-3, **kwargs):
-        '''
-        Builds a layer that calculates the rbf kernel between two set of vectors
-        Arguments:
-            sigma: RBF scale parameter. 
-        '''
-        super().__init__(sigma, dim, trainable, min_sigma, **kwargs)
+    """Memory-variant RBF kernel: B carries a batch dimension.
 
-    def call(self, A, B):
-        '''
-        Input:
+    Used by `MemKDMLayer`, where each query sample has its own set of
+    neighbors (rather than a shared support set).
+    """
+
+    def forward(self, A, B):
+        """
+        Arguments:
             A: tensor of shape (bs, n, d)
             B: tensor of shape (bs, m, d)
-        Result:
+        Returns:
             K: tensor of shape (bs, n, m)
-        '''
-        A_norm = keras.ops.sum(A ** 2, axis=-1)[..., np.newaxis]  # shape (bs, n, 1)
-        B_norm = keras.ops.sum(B ** 2, axis=-1)[:, np.newaxis, :]  # shape (bs, 1, m)
-        AB = keras.ops.matmul(A, keras.ops.transpose(B, [0, 2, 1])) 
-        dist2 = A_norm + B_norm - 2. * AB # shape (bs, n, m)
-        dist2 = keras.ops.clip(dist2, 0., np.inf)
-        sigma = keras.ops.clip(self.sigma, self.min_sigma, np.inf)
-        K = keras.ops.exp(-dist2 / (2. * sigma ** 2.)) # type: ignore
-        return K
+        """
+        AB = torch.matmul(A, B.transpose(1, 2))  # (bs, n, m)
+        A_norm = (A ** 2).sum(dim=-1, keepdim=True)          # (bs, n, 1)
+        B_norm = (B ** 2).sum(dim=-1).unsqueeze(1)           # (bs, 1, m)
+        dist2 = (A_norm + B_norm - 2.0 * AB).clamp(min=0.0)
+        return torch.exp(-dist2 / (2.0 * self.sigma ** 2))
