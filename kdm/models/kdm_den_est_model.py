@@ -1,51 +1,46 @@
-import keras
-from ..layers import RBFKernelLayer, KDMProjLayer
-import numpy as np
-from sklearn.neighbors import NearestNeighbors
-import tensorflow_probability as tfp
+import math
 
-class KDMDenEstModel(keras.Model):
-    def __init__(self,
-                 dim_x,
-                 sigma,
-                 n_comp,
-                 trainable_sigma=True,
-                 **kwargs):
-        super().__init__(**kwargs)
+import torch
+import torch.nn as nn
+from torch.distributions import Categorical, Independent, MixtureSameFamily, Normal
+
+from ..layers import KDMProjLayer, RBFKernelLayer
+
+
+class KDMDenEstModel(nn.Module):
+    """KDM density estimation model.
+
+    `forward(x)` returns per-sample log-density under the learned KDM. The
+    training loop minimizes `-forward(x).mean()`.
+    """
+
+    def __init__(
+        self,
+        dim_x: int,
+        sigma: float,
+        n_comp: int,
+        trainable_sigma: bool = True,
+    ):
+        super().__init__()
         self.dim_x = dim_x
         self.n_comp = n_comp
-        self.kernel = RBFKernelLayer(sigma, trainable=trainable_sigma, dim=dim_x)
-        self.kdmproj = KDMProjLayer(self.kernel,
-                                dim_x=dim_x,
-                                n_comp=n_comp)
-        self.eps = keras.config.epsilon()
+        self.kernel = RBFKernelLayer(
+            sigma=sigma, dim=dim_x, trainable=trainable_sigma
+        )
+        self.kdmproj = KDMProjLayer(self.kernel, dim_x=dim_x, n_comp=n_comp)
+        self.eps = 1e-7
 
-    def call(self, inputs):
-        log_probs = (keras.ops.log(self.kdmproj(inputs) + self.eps)
-                     + self.kernel.log_weight())
-        self.add_loss(-keras.ops.mean(log_probs))
-        return log_probs
-    
-    def init_components(self, samples_x, init_sigma=False, sigma_mult=1):
-        if init_sigma:
-            nn_model = NearestNeighbors(n_neighbors=3)
-            nn_model.fit(samples_x)
-            distances, _ = nn_model.kneighbors(samples_x)
-            sigma = np.mean(distances[:, 2]) * sigma_mult
-            self.kernel.sigma.assign(sigma)
-        self.kdmproj.c_x.assign(samples_x)
-        self.kdmproj.c_w.assign(keras.ops.ones((self.n_comp,)) / self.n_comp)
+    def forward(self, x):
+        return torch.log(self.kdmproj(x) + self.eps) + self.kernel.log_weight()
 
-    def get_distrib(self):
-        comp_w = keras.ops.abs(self.kdmproj.c_w) + self.eps
-        comp_w = comp_w / keras.ops.sum(comp_w)
-        gm = tfp.distributions.MixtureSameFamily(
-            reparameterize=True,
-            mixture_distribution=tfp.distributions.Categorical(
-                                    probs=comp_w),
-            components_distribution=tfp.distributions.Independent( 
-                tfp.distributions.Normal(
-                    loc=self.kdmproj.c_x,  # component 2
-                    scale=self.kernel.sigma / np.sqrt(2.)),
-                    reinterpreted_batch_ndims=1))
-        return gm
+    def get_distrib(self) -> MixtureSameFamily:
+        comp_w = self.kdmproj.c_w.detach().abs() + self.eps
+        comp_w = comp_w / comp_w.sum()
+        scale = self.kernel.sigma.detach() / math.sqrt(2.0)
+        return MixtureSameFamily(
+            mixture_distribution=Categorical(probs=comp_w),
+            component_distribution=Independent(
+                Normal(loc=self.kdmproj.c_x.detach(), scale=scale),
+                reinterpreted_batch_ndims=1,
+            ),
+        )
