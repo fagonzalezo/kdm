@@ -1,22 +1,54 @@
 #  Kernel Density Matrices
 
-Kernel Density Matrices (KDMs) are a generalization of density matrices used in quantum mechanics to represent the probabilistic state of a quantum system. KDMs provide a simpler yet effective mechanism for representing joint probability distributions of both continuous and discrete random variables. The framework allows for the construction of differentiable models for density estimation, inference, and sampling, enabling integration into end-to-end deep neural models. 
+> **v2.0 — PyTorch port.** The library is now native PyTorch (no Keras / TensorFlow / TFP).
+> The original Keras 3 release is preserved on the [`keras-legacy`](https://github.com/fagonzalezo/kdm/tree/keras-legacy)
+> branch and tag `v1.0-keras-final`. To keep using it, install the legacy distribution:
+>
+> ```zsh
+> pip install 'kdm<2'
+> ```
+>
+> Three core notebooks (`kdm_classification`, `kdm_regression`, `kdm_density_estimation`) have
+> been ported. The other examples in `examples/` are tagged with a banner and still target
+> the Keras release.
+
+Kernel Density Matrices (KDMs) are a generalization of density matrices used in quantum mechanics to represent the probabilistic state of a quantum system. KDMs provide a simpler yet effective mechanism for representing joint probability distributions of both continuous and discrete random variables. The framework allows for the construction of differentiable models for density estimation, inference, and sampling, enabling integration into end-to-end deep neural models.
 
 # Getting Started
 
-You can install the most recent version of the library with
+Install the PyTorch port from source:
 
 ```zsh
 pip install git+https://github.com/fagonzalezo/kdm.git
 ```
 
-Memory based models require additionally the installation of the `faiss` library. You can install it with
+Memory-based models additionally require `faiss`:
 
 ```zsh
-pip install faiss-cpu
+pip install 'kdm-torch[mem]'
 ```
 
-Check our [examples](https://github.com/fagonzalezo/kdm/tree/master/examples) to see what you can do!
+Check our [examples](https://github.com/fagonzalezo/kdm/tree/main/examples) to see what you can do.
+
+## Quickstart
+
+```python
+import torch, torch.nn as nn
+from kdm.models import KDMClassModel
+from kdm.init import init_kdm_layer
+
+encoder = nn.Sequential(nn.Linear(2, 32), nn.ReLU(), nn.Linear(32, 8))
+model   = KDMClassModel(encoded_size=8, dim_y=2, encoder=encoder, n_comp=64, sigma=0.5)
+
+# Initialize support points from a small batch of training data
+init_kdm_layer(model.kdm, encoder(x_init).detach(), y_init_onehot, init_sigma=True)
+
+opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+for xb, yb in loader:
+    probs = model(xb)
+    loss  = nn.functional.nll_loss(torch.log(probs + 1e-8), yb)
+    opt.zero_grad(); loss.backward(); opt.step()
+```
 ## Paper
 
 > **Kernel Density Matrices for Probabilistic Deep Learning**

@@ -3,34 +3,33 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kdm"
-version = "1.0.0"
+name = "kdm-torch"
+version = "2.0.0"
 authors = [
     {name = "Fabio A. González", email = "fagonzalezo@unal.edu.co"},
 ]
-description = "Probabilistic deep learning with kernel Density Matrices"
+description = "Probabilistic deep learning with Kernel Density Matrices (PyTorch)"
 readme = "README.md"
 requires-python = ">=3.10"
-keywords = ["machine learning", "density matrices", "deep learning"]
+keywords = ["machine learning", "density matrices", "deep learning", "pytorch"]
 license = {text = "GNU LGPL 2.1"}
 classifiers = [
-    "Framework :: Keras",
     "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
+    "torch>=2.2",
     "numpy",
     "scipy",
     "scikit-learn",
-    "tensorflow-probability>=0.24",
-    "tensorflow>=2.16",
-    "tf-keras>=2.16",
 ]
 
-
 [project.optional-dependencies]
-faiss = ["faiss-cpu>=1.8.0"]
+mem = ["faiss-cpu>=1.8.0"]
+
+[tool.setuptools.packages.find]
+include = ["kdm*"]
 
 [project.urls]
 Homepage = "https://github.com/fagonzalezo/kdm.git"
 Repository = "https://github.com/fagonzalezo/kdm.git"
-
