@@ -11,4 +11,5 @@ test_generative_regress.ipynb
 *.pdf
 .claude/CLAUDE.md
 .claude/settings.local.json
+.claude/
 
