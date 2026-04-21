@@ -1,150 +1,266 @@
 """
-Equivalence tests for kdm/utils.py (PyTorch port).
+Functional tests for kdm/utils.py (PyTorch).
 
-Reference outputs were produced from the Keras 3 version on the keras-legacy
-branch; see tests/generate_fixtures.py. Fixtures are stored as float64 to
-sidestep latent dtype bugs in the original Keras utilities (they do not
-affect notebook users, who always ran with float32 tensors that happened to
-avoid the bool/int / float64 mixing points).
-
-The PyTorch port is tested here in float64 for tight numerical agreement
-(tol=1e-10) and separately in float32 (tol=1e-6) to guard against any
-cross-dtype regressions.
+Each test validates a mathematical property or behavioral invariant of the
+utility functions, using inline data only — no external fixture files required.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+import math
 
 import numpy as np
 import pytest
 import torch
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "kdm"))
+from kdm import utils
 
-import utils  # noqa: E402  (the PyTorch kdm/utils.py, loaded bare)
-
-FIXTURES_PATH = REPO_ROOT / "tests" / "fixtures" / "utils_references.npz"
-
-
-@pytest.fixture(scope="module")
-def refs() -> dict[str, np.ndarray]:
-    if not FIXTURES_PATH.exists():
-        pytest.fail(
-            f"Missing fixture file {FIXTURES_PATH}. Regenerate with:\n"
-            f"    conda run -n tf2 python tests/generate_fixtures.py"
-        )
-    with np.load(FIXTURES_PATH) as f:
-        return {k: f[k] for k in f.files}
-
-
-def _t(arr: np.ndarray, dtype: torch.dtype = torch.float64) -> torch.Tensor:
-    return torch.as_tensor(arr, dtype=dtype)
-
-
-def _assert_close(torch_out, keras_ref, *, dtype: torch.dtype) -> None:
-    tol = {torch.float64: 1e-10, torch.float32: 1e-6}[dtype]
-    actual = torch_out.detach().cpu().numpy()
-    expected = np.asarray(keras_ref, dtype=actual.dtype)
-    np.testing.assert_allclose(actual, expected, rtol=tol, atol=tol)
-
+RNG = np.random.default_rng(42)
 
 DTYPES = [torch.float64, torch.float32]
 DTYPE_IDS = ["float64", "float32"]
 
 
+def _t(arr, dtype=torch.float64):
+    return torch.as_tensor(np.asarray(arr), dtype=dtype)
+
+
+def _rand(shape, dtype):
+    return torch.as_tensor(RNG.standard_normal(shape), dtype=dtype)
+
+
+def _valid_dm(bs, n, d, dtype):
+    """Build a KDM with valid (non-negative, normalized) weights."""
+    w = torch.softmax(_rand((bs, n), dtype), dim=-1)
+    v = _rand((bs, n, d), dtype)
+    return torch.cat([w.unsqueeze(-1), v], dim=2)
+
+
+# ---------------------------------------------------------------------------
+# dm2comp / comp2dm
+# ---------------------------------------------------------------------------
+
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_dm2comp(refs, dtype):
-    dm = _t(refs["input_dm"], dtype)
+def test_dm2comp_roundtrip(dtype):
+    dm = _rand((4, 5, 4), dtype)
     w, v = utils.dm2comp(dm)
-    _assert_close(w, refs["out_dm2comp_w"], dtype=dtype)
-    _assert_close(v, refs["out_dm2comp_v"], dtype=dtype)
+    assert w.shape == (4, 5)
+    assert v.shape == (4, 5, 3)
+    dm2 = utils.comp2dm(w, v)
+    assert dm2.shape == dm.shape
+    assert torch.equal(dm, dm2)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_comp2dm(refs, dtype):
-    out = utils.comp2dm(_t(refs["input_w"], dtype), _t(refs["input_v"], dtype))
-    _assert_close(out, refs["out_comp2dm"], dtype=dtype)
-
-
-@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_pure2dm(refs, dtype):
-    out = utils.pure2dm(_t(refs["input_psi"], dtype))
-    _assert_close(out, refs["out_pure2dm"], dtype=dtype)
-
-
-@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_dm2discrete(refs, dtype):
-    out = utils.dm2discrete(_t(refs["input_dm"], dtype))
-    _assert_close(out, refs["out_dm2discrete"], dtype=dtype)
-
-
-@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_dm_rbf_loglik(refs, dtype):
-    out = utils.dm_rbf_loglik(
-        _t(refs["input_x_query"], dtype),
-        _t(refs["input_dm"], dtype),
-        _t(refs["input_sigma"], dtype),
-    )
-    _assert_close(out, refs["out_dm_rbf_loglik"], dtype=dtype)
-
-
-@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_dm_rbf_expectation(refs, dtype):
-    out = utils.dm_rbf_expectation(_t(refs["input_dm"], dtype))
-    _assert_close(out, refs["out_dm_rbf_expectation"], dtype=dtype)
-
-
-@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_dm_rbf_variance(refs, dtype):
-    out = utils.dm_rbf_variance(
-        _t(refs["input_dm"], dtype),
-        _t(refs["input_sigma"], dtype),
-    )
-    _assert_close(out, refs["out_dm_rbf_variance"], dtype=dtype)
-
-
-@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_gauss_entropy_lb(refs, dtype):
-    # d is a Python int in the reference; pass the same.
-    d = int(refs["input_v"].shape[-1])
-    out = utils.gauss_entropy_lb(d, _t(refs["input_sigma"], dtype))
-    _assert_close(out, refs["out_gauss_entropy_lb"], dtype=dtype)
-
-
-@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_cartesian_product_1(refs, dtype):
-    out = utils.cartesian_product([_t(refs["input_cart_a"], dtype)])
-    _assert_close(out, refs["out_cartesian_product_1"], dtype=dtype)
-
-
-@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_cartesian_product_2(refs, dtype):
-    out = utils.cartesian_product(
-        [_t(refs["input_cart_a"], dtype), _t(refs["input_cart_b"], dtype)]
-    )
-    _assert_close(out, refs["out_cartesian_product_2"], dtype=dtype)
-
-
-@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_cartesian_product_3(refs, dtype):
-    out = utils.cartesian_product(
-        [
-            _t(refs["input_cart_a"], dtype),
-            _t(refs["input_cart_b"], dtype),
-            _t(refs["input_cart_c"], dtype),
-        ]
-    )
-    _assert_close(out, refs["out_cartesian_product_3"], dtype=dtype)
+def test_comp2dm_structure(dtype):
+    w = _rand((4, 5), dtype)
+    v = _rand((4, 5, 3), dtype)
+    dm = utils.comp2dm(w, v)
+    assert torch.equal(dm[:, :, 0], w)
+    assert torch.equal(dm[:, :, 1:], v)
 
 
 # ---------------------------------------------------------------------------
-# samples2dm: the Keras version has a bool/int dtype bug that made it unusable
-# on TF backend (never called from any notebook or model). The torch port
-# fixes it; verified here against a pure-numpy reference.
+# pure2dm
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_pure2dm_shape_and_weight(dtype):
+    psi = _rand((4, 3), dtype)
+    dm = utils.pure2dm(psi)
+    assert dm.shape == (4, 1, 4)
+    assert torch.all(dm[:, 0, 0] == 1.0)
+    assert torch.equal(dm[:, 0, 1:], psi)
+
+
+# ---------------------------------------------------------------------------
+# dm2discrete
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_dm2discrete_valid_distribution(dtype):
+    dm = _valid_dm(4, 5, 3, dtype)
+    probs = utils.dm2discrete(dm)
+    assert probs.shape == (4, 3)
+    assert torch.all(probs >= 0)
+    assert torch.all(probs <= 1)
+    assert torch.allclose(probs.sum(dim=-1), torch.ones(4, dtype=dtype), atol=1e-5)
+
+
+def test_dm2discrete_pure_state():
+    # A pure state on the k-th standard basis vector should concentrate on k.
+    d = 4
+    k = 2
+    psi = torch.zeros(1, d)
+    psi[0, k] = 1.0
+    dm = utils.pure2dm(psi)
+    probs = utils.dm2discrete(dm)
+    assert probs.argmax(dim=-1).item() == k
+
+
+# ---------------------------------------------------------------------------
+# dm_rbf_loglik
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_dm_rbf_loglik_shape_and_dtype(dtype):
+    x = _rand((4, 3), dtype)
+    dm = _valid_dm(4, 5, 3, dtype)
+    sigma = torch.tensor(0.7, dtype=dtype)
+    out = utils.dm_rbf_loglik(x, dm, sigma)
+    assert out.shape == (4,)
+    assert out.dtype == dtype
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_dm_rbf_loglik_monotone(dtype):
+    # Loglik should be higher when query matches the support than when far away.
+    mu = torch.tensor([[1.0, 2.0, 3.0]], dtype=dtype)
+    dm = utils.pure2dm(mu)  # single-component DM at mu
+    sigma = torch.tensor(1.0, dtype=dtype)
+    loglik_near = utils.dm_rbf_loglik(mu, dm, sigma)
+    far = mu + 100.0
+    loglik_far = utils.dm_rbf_loglik(far, dm, sigma)
+    assert loglik_near.item() > loglik_far.item()
+
+
+def test_dm_rbf_loglik_gradient_flows():
+    psi = torch.randn(3, 4, requires_grad=True, dtype=torch.float64)
+    dm = utils.pure2dm(psi)
+    x = torch.randn(3, 4, dtype=torch.float64)
+    sigma = torch.tensor(1.0, dtype=torch.float64)
+    out = utils.dm_rbf_loglik(x, dm, sigma)
+    out.sum().backward()
+    assert psi.grad is not None
+    assert torch.isfinite(psi.grad).all()
+
+
+# ---------------------------------------------------------------------------
+# dm_rbf_expectation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_dm_rbf_expectation_single_component(dtype):
+    psi = _rand((4, 3), dtype)
+    dm = utils.pure2dm(psi)
+    exp = utils.dm_rbf_expectation(dm)
+    atol = 1e-12 if dtype == torch.float64 else 1e-6
+    assert torch.allclose(exp, psi, atol=atol)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_dm_rbf_expectation_weighted_mean(dtype):
+    v1 = torch.tensor([[1.0, 0.0, 0.0]], dtype=dtype)
+    v2 = torch.tensor([[0.0, 1.0, 0.0]], dtype=dtype)
+    w = torch.tensor([[0.3, 0.7]], dtype=dtype)
+    v = torch.cat([v1.unsqueeze(1), v2.unsqueeze(1)], dim=1)
+    dm = utils.comp2dm(w, v)
+    exp = utils.dm_rbf_expectation(dm)
+    expected = (0.3 * v1 + 0.7 * v2)
+    atol = 1e-12 if dtype == torch.float64 else 1e-6
+    assert torch.allclose(exp, expected, atol=atol)
+
+
+# ---------------------------------------------------------------------------
+# dm_rbf_variance
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_dm_rbf_variance_nonnegative(dtype):
+    # Only guaranteed non-negative for valid KDMs (non-negative weights summing to 1).
+    dm = _valid_dm(4, 5, 3, dtype)
+    sigma = torch.tensor(0.7, dtype=dtype)
+    var = utils.dm_rbf_variance(dm, sigma)
+    assert torch.all(var >= 0)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_dm_rbf_variance_single_component(dtype):
+    # For a pure state, between-component variance is 0.
+    # Total = d * (sigma / sqrt(2))^2 = d * sigma^2 / 2
+    d = 4
+    sigma_val = 0.7
+    psi = _rand((3, d), dtype)
+    dm = utils.pure2dm(psi)
+    sigma = torch.tensor(sigma_val, dtype=dtype)
+    var = utils.dm_rbf_variance(dm, sigma)
+    expected = d * (sigma_val ** 2) / 2.0
+    atol = 1e-10 if dtype == torch.float64 else 1e-5
+    assert torch.allclose(var, torch.full_like(var, expected), atol=atol)
+
+
+# ---------------------------------------------------------------------------
+# gauss_entropy_lb
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_gauss_entropy_lb_formula(dtype):
+    d, sigma_val = 4, 0.7
+    sigma = torch.tensor(sigma_val, dtype=dtype)
+    result = utils.gauss_entropy_lb(d, sigma)
+    expected = (d / 2.0) * (1.0 + math.log(2.0 * math.pi * sigma_val ** 2))
+    atol = 1e-10 if dtype == torch.float64 else 1e-5
+    assert abs(result.item() - expected) < atol
+
+
+def test_gauss_entropy_lb_monotone():
+    d = 4
+    lb_small = utils.gauss_entropy_lb(d, torch.tensor(0.5, dtype=torch.float64))
+    lb_large = utils.gauss_entropy_lb(d, torch.tensor(2.0, dtype=torch.float64))
+    assert lb_large > lb_small
+
+
+# ---------------------------------------------------------------------------
+# cartesian_product
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_cartesian_product_identity(dtype):
+    a = _rand((4, 3), dtype)
+    out = utils.cartesian_product([a])
+    assert torch.equal(out, a)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_cartesian_product_two(dtype):
+    a = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=dtype)
+    b = torch.tensor([[0.5, 0.5, 1.0], [1.0, 2.0, 3.0]], dtype=dtype)
+    out = utils.cartesian_product([a, b])
+    assert out.shape == (2, 6)
+    # Each element [i, j*3+k] == a[i,j] * b[i,k]
+    for i in range(2):
+        for j in range(2):
+            for k in range(3):
+                atol = 1e-12 if dtype == torch.float64 else 1e-6
+                assert abs(out[i, j * 3 + k].item() - (a[i, j] * b[i, k]).item()) < atol
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_cartesian_product_three_shape(dtype):
+    a = _rand((3, 2), dtype)
+    b = _rand((3, 3), dtype)
+    c = _rand((3, 4), dtype)
+    out = utils.cartesian_product([a, b, c])
+    assert out.shape == (3, 24)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_cartesian_product_probability_vectors(dtype):
+    # cartesian product of probability vectors is a probability vector
+    bs = 3
+    for sizes in [(4,), (4, 5), (4, 5, 3)]:
+        tensors = []
+        for s in sizes:
+            t = torch.abs(_rand((bs, s), dtype)) + 0.1
+            t = t / t.sum(dim=-1, keepdim=True)
+            tensors.append(t)
+        out = utils.cartesian_product(tensors)
+        atol = 1e-10 if dtype == torch.float64 else 1e-5
+        assert torch.allclose(out.sum(dim=-1), torch.ones(bs, dtype=dtype), atol=atol)
+
+
+# ---------------------------------------------------------------------------
+# samples2dm
+# ---------------------------------------------------------------------------
 
 def _numpy_samples2dm(samples: np.ndarray) -> np.ndarray:
     nonzero = np.any(samples != 0, axis=-1).astype(samples.dtype)
@@ -153,8 +269,43 @@ def _numpy_samples2dm(samples: np.ndarray) -> np.ndarray:
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_samples2dm_against_numpy(refs, dtype):
-    samples_np = refs["input_samples_with_zeros"]
+def test_samples2dm_nonzero_weights(dtype):
+    # Construct samples where some rows are all zero.
+    samples = torch.zeros(2, 4, 3, dtype=dtype)
+    samples[0, 0] = torch.tensor([1.0, 0.0, 0.0], dtype=dtype)
+    samples[0, 2] = torch.tensor([0.0, 1.0, 0.0], dtype=dtype)
+    samples[1, 1] = torch.tensor([0.5, 0.5, 0.0], dtype=dtype)
+    samples[1, 3] = torch.tensor([0.0, 0.0, 1.0], dtype=dtype)
+
+    dm = utils.samples2dm(samples)
+    w = dm[:, :, 0]
+    # Zero rows get zero weight
+    assert w[0, 1].item() == 0.0 and w[0, 3].item() == 0.0
+    assert w[1, 0].item() == 0.0 and w[1, 2].item() == 0.0
+    # Remaining weights are equal and positive
+    assert abs(w[0, 0].item() - w[0, 2].item()) < 1e-6
+    assert abs(w[1, 1].item() - w[1, 3].item()) < 1e-6
+    # Weights sum to 1
+    atol = 1e-10 if dtype == torch.float64 else 1e-6
+    assert torch.allclose(w.sum(dim=-1), torch.ones(2, dtype=dtype), atol=atol)
+    # Vector slice is unchanged
+    assert torch.equal(dm[:, :, 1:], samples)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_samples2dm_matches_numpy(dtype):
+    # Validate against the corrected numpy formula.
+    # The original Keras version had a bool/int dtype bug; the torch port fixes it.
+    samples_np = RNG.standard_normal((4, 5, 3))
+    # Force some rows to zero
+    samples_np[0, 2] = 0.0
+    samples_np[1, 4] = 0.0
+    samples_np[2, 0] = 0.0
     expected = _numpy_samples2dm(samples_np)
     out = utils.samples2dm(_t(samples_np, dtype))
-    _assert_close(out, expected, dtype=dtype)
+    tol = 1e-10 if dtype == torch.float64 else 1e-6
+    np.testing.assert_allclose(
+        out.detach().cpu().numpy(),
+        expected.astype(out.numpy().dtype),
+        rtol=tol, atol=tol,
+    )

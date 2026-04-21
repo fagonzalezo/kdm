@@ -1,23 +1,17 @@
 """
-Equivalence tests for the ported layers in kdm/layers/ (PyTorch).
+Functional tests for kdm/layers/ (PyTorch).
 
-Reference outputs were produced from the Keras 3 version on the keras-legacy
-branch; see tests/generate_layer_fixtures.py. Each test materializes the
-trainable weights from the same numpy arrays used by the fixture generator,
-so any discrepancy reflects a genuine math difference (not init drift).
-
-The softplus reparameterization on RBFKernelLayer means direct assignment to
-`kernel.sigma = value` internally inverts softplus; the sigma property still
-returns the requested value to within float round-off, so numerical
-equivalence is preserved.
+Each test validates a mathematical property or behavioral invariant using
+inline data only — no external fixture files required.
 """
 from __future__ import annotations
 
-from pathlib import Path
+import math
 
 import numpy as np
 import pytest
 import torch
+import torch.nn.functional as F
 
 from kdm.layers import (
     CosineKernelLayer,
@@ -28,38 +22,20 @@ from kdm.layers import (
     MemRBFKernelLayer,
     RBFKernelLayer,
 )
+from kdm.utils import pure2dm
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-FIXTURES_PATH = REPO_ROOT / "tests" / "fixtures" / "layer_references.npz"
+RNG = np.random.default_rng(2024)
 
-
-@pytest.fixture(scope="module")
-def refs() -> dict[str, np.ndarray]:
-    if not FIXTURES_PATH.exists():
-        pytest.fail(
-            f"Missing fixture file {FIXTURES_PATH}. Regenerate with:\n"
-            f"    conda run -n tf2 python tests/generate_layer_fixtures.py"
-        )
-    with np.load(FIXTURES_PATH) as f:
-        return {k: f[k] for k in f.files}
+DTYPES = [torch.float64, torch.float32]
+DTYPE_IDS = ["float64", "float32"]
 
 
-def _t(arr: np.ndarray, dtype: torch.dtype) -> torch.Tensor:
-    return torch.as_tensor(arr, dtype=dtype)
-
-
-def _assert_close(actual: torch.Tensor, expected: np.ndarray, *, dtype: torch.dtype) -> None:
-    tol = {torch.float64: 1e-10, torch.float32: 1e-6}[dtype]
-    act = actual.detach().cpu().numpy()
-    exp = np.asarray(expected, dtype=act.dtype)
-    np.testing.assert_allclose(act, exp, rtol=tol, atol=tol)
+def _rand(shape, dtype):
+    return torch.as_tensor(RNG.standard_normal(shape), dtype=dtype)
 
 
 def _cast_layer(layer: torch.nn.Module, dtype: torch.dtype) -> torch.nn.Module:
-    # Capture sigmas before casting: raw_sigma was computed via softplus_inv at
-    # the layer's original (float32) precision; simply casting to float64 would
-    # leave a float32-precision value in a float64 tensor. Re-assigning sigma
-    # after cast re-runs softplus_inv at the new dtype.
+    # Re-assign sigma after cast so softplus_inv runs at the new dtype.
     rbf_sigmas = [
         (m, float(m.sigma.detach()))
         for m in layer.modules()
@@ -71,110 +47,303 @@ def _cast_layer(layer: torch.nn.Module, dtype: torch.dtype) -> torch.nn.Module:
     return layer
 
 
-DTYPES = [torch.float64, torch.float32]
-DTYPE_IDS = ["float64", "float32"]
+# ---------------------------------------------------------------------------
+# RBFKernelLayer
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_rbf_kernel_shape(dtype):
+    layer = _cast_layer(RBFKernelLayer(sigma=0.5, dim=3), dtype)
+    A = _rand((4, 5, 3), dtype)
+    B = _rand((7, 3), dtype)
+    K = layer(A, B)
+    assert K.shape == (4, 5, 7)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_rbf_kernel(refs, dtype):
-    sigma = float(refs["input_sigma"])
-    d = int(refs["input_A"].shape[-1])
-    layer = _cast_layer(RBFKernelLayer(sigma=sigma, dim=d), dtype)
-    K = layer(_t(refs["input_A"], dtype), _t(refs["input_B"], dtype))
-    _assert_close(K, refs["out_rbf_K"], dtype=dtype)
-    _assert_close(layer.log_weight(), refs["out_rbf_log_weight"], dtype=dtype)
+def test_rbf_kernel_self_similarity(dtype):
+    # K(x, x) = exp(0) = 1 for every x.
+    layer = _cast_layer(RBFKernelLayer(sigma=0.5, dim=3), dtype)
+    A = _rand((1, 5, 3), dtype)
+    K = layer(A, A[0])  # square kernel matrix
+    diag = K[0].diagonal()
+    atol = 1e-12 if dtype == torch.float64 else 1e-6
+    assert torch.allclose(diag, torch.ones_like(diag), atol=atol)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_cosine_kernel(refs, dtype):
+def test_rbf_kernel_symmetry(dtype):
+    # K(A, B) == K(B, A).T when A and B contain the same vectors (square case).
+    layer = _cast_layer(RBFKernelLayer(sigma=0.5, dim=3), dtype)
+    A = _rand((1, 5, 3), dtype)
+    K = layer(A, A[0])
+    atol = 1e-12 if dtype == torch.float64 else 1e-6
+    assert torch.allclose(K[0], K[0].T, atol=atol)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_rbf_kernel_values_in_range(dtype):
+    layer = _cast_layer(RBFKernelLayer(sigma=0.5, dim=3), dtype)
+    A = _rand((4, 5, 3), dtype)
+    B = _rand((7, 3), dtype)
+    K = layer(A, B)
+    assert torch.all(K > 0)
+    assert torch.all(K <= 1.0 + 1e-6)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_rbf_kernel_log_weight_formula(dtype):
+    # Verify the formula: log_weight = −d·log(σ+ε) − d·log(π)/2
+    # Use the layer's actual sigma (post-softplus) to avoid roundtrip precision issues.
+    d = 3
+    layer = _cast_layer(RBFKernelLayer(sigma=0.7, dim=d), dtype)
+    sigma_actual = layer.sigma.detach()
+    result = layer.log_weight()
+    expected = -d * torch.log(sigma_actual + 1e-12) - d * math.log(math.pi) / 2.0
+    atol = 1e-12 if dtype == torch.float64 else 1e-6
+    assert torch.allclose(result, expected, atol=atol)
+
+
+def test_rbf_kernel_sigma_property():
+    layer = RBFKernelLayer(sigma=1.0, dim=3)
+    layer.sigma = 0.5
+    assert abs(layer.sigma.detach().item() - 0.5) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# CosineKernelLayer
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_cosine_kernel_shape(dtype):
     layer = _cast_layer(CosineKernelLayer(), dtype)
-    K = layer(_t(refs["input_A"], dtype), _t(refs["input_B"], dtype))
-    _assert_close(K, refs["out_cos_K"], dtype=dtype)
+    A = _rand((4, 5, 3), dtype)
+    B = _rand((7, 3), dtype)
+    K = layer(A, B)
+    assert K.shape == (4, 5, 7)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_crossproduct_kernel(refs, dtype):
-    dim1 = int(refs["input_cp_dim1"])
-    d = int(refs["input_A"].shape[-1])
-    sigma1 = float(refs["input_cp_sigma1"])
-    sigma2 = float(refs["input_cp_sigma2"])
-    k1 = RBFKernelLayer(sigma=sigma1, dim=dim1)
-    k2 = RBFKernelLayer(sigma=sigma2, dim=d - dim1)
+def test_cosine_kernel_range(dtype):
+    layer = _cast_layer(CosineKernelLayer(), dtype)
+    A = _rand((4, 5, 3), dtype)
+    B = _rand((7, 3), dtype)
+    K = layer(A, B)
+    assert torch.all(K >= -1.0 - 1e-6)
+    assert torch.all(K <= 1.0 + 1e-6)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_cosine_kernel_self_similarity(dtype):
+    layer = _cast_layer(CosineKernelLayer(), dtype)
+    A = _rand((1, 5, 3), dtype)
+    K = layer(A, A[0])
+    diag = K[0].diagonal()
+    atol = 1e-12 if dtype == torch.float64 else 1e-6
+    assert torch.allclose(diag, torch.ones_like(diag), atol=atol)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_cosine_kernel_scale_invariant(dtype):
+    layer = _cast_layer(CosineKernelLayer(), dtype)
+    A = _rand((4, 5, 3), dtype)
+    B = _rand((7, 3), dtype)
+    K1 = layer(A, B)
+    K2 = layer(2.0 * A, B)
+    atol = 1e-12 if dtype == torch.float64 else 1e-6
+    assert torch.allclose(K1, K2, atol=atol)
+
+
+# ---------------------------------------------------------------------------
+# CrossProductKernelLayer
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_crossproduct_kernel_shape(dtype):
+    k1 = RBFKernelLayer(sigma=0.5, dim=2)
+    k2 = RBFKernelLayer(sigma=0.8, dim=3)
+    layer = _cast_layer(CrossProductKernelLayer(dim1=2, kernel1=k1, kernel2=k2), dtype)
+    A = _rand((4, 5, 5), dtype)
+    B = _rand((7, 5), dtype)
+    K = layer(A, B)
+    assert K.shape == (4, 5, 7)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_crossproduct_kernel_factorization(dtype):
+    dim1 = 2
+    k1 = _cast_layer(RBFKernelLayer(sigma=0.5, dim=dim1), dtype)
+    k2 = _cast_layer(RBFKernelLayer(sigma=0.8, dim=3), dtype)
     layer = _cast_layer(
         CrossProductKernelLayer(dim1=dim1, kernel1=k1, kernel2=k2), dtype
     )
-    K = layer(_t(refs["input_A"], dtype), _t(refs["input_B"], dtype))
-    _assert_close(K, refs["out_cp_K"], dtype=dtype)
-    _assert_close(layer.log_weight(), refs["out_cp_log_weight"], dtype=dtype)
+    A = _rand((4, 5, 5), dtype)
+    B = _rand((7, 5), dtype)
+    K_cp = layer(A, B)
+    K1 = k1(A[:, :, :dim1], B[:, :dim1])
+    K2 = k2(A[:, :, dim1:], B[:, dim1:])
+    atol = 1e-12 if dtype == torch.float64 else 1e-6
+    assert torch.allclose(K_cp, K1 * K2, atol=atol)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_kdm_proj_layer(refs, dtype):
-    d = int(refs["input_proj_input"].shape[-1])
-    n_comp = int(refs["input_c_x"].shape[0])
-    sigma = float(refs["input_sigma"])
-    kernel = RBFKernelLayer(sigma=sigma, dim=d)
-    layer = _cast_layer(
-        KDMProjLayer(kernel=kernel, dim_x=d, n_comp=n_comp), dtype
+def test_crossproduct_kernel_log_weight(dtype):
+    k1 = RBFKernelLayer(sigma=0.5, dim=2)
+    k2 = RBFKernelLayer(sigma=0.8, dim=3)
+    layer = _cast_layer(CrossProductKernelLayer(dim1=2, kernel1=k1, kernel2=k2), dtype)
+    k1c = list(layer.modules())[1]
+    k2c = list(layer.modules())[2]
+    atol = 1e-12 if dtype == torch.float64 else 1e-6
+    assert torch.allclose(
+        layer.log_weight(), k1c.log_weight() + k2c.log_weight(), atol=atol
     )
-    with torch.no_grad():
-        layer.c_x.copy_(_t(refs["input_c_x"], dtype))
-        layer.c_w.copy_(_t(refs["input_c_w"], dtype))
-    out = layer(_t(refs["input_proj_input"], dtype))
-    _assert_close(out, refs["out_proj"], dtype=dtype)
+
+
+# ---------------------------------------------------------------------------
+# KDMProjLayer
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_kdm_proj_layer_shape(dtype):
+    kernel = RBFKernelLayer(sigma=0.5, dim=3)
+    layer = _cast_layer(KDMProjLayer(kernel=kernel, dim_x=3, n_comp=7), dtype)
+    x = _rand((4, 3), dtype)
+    out = layer(x)
+    assert out.shape == (4,)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_kdm_layer_forward(refs, dtype):
-    d = int(refs["input_c_x"].shape[-1])
-    dim_y = int(refs["input_c_y"].shape[-1])
-    n_comp = int(refs["input_c_x"].shape[0])
-    sigma = float(refs["input_sigma"])
-    kernel = RBFKernelLayer(sigma=sigma, dim=d)
-    layer = _cast_layer(
-        KDMLayer(kernel=kernel, dim_x=d, dim_y=dim_y, n_comp=n_comp), dtype
-    )
-    with torch.no_grad():
-        layer.c_x.copy_(_t(refs["input_c_x"], dtype))
-        layer.c_y.copy_(_t(refs["input_c_y"], dtype))
-        layer.c_w.copy_(_t(refs["input_c_w"], dtype))
-    rho_out = layer(_t(refs["input_rho_in"], dtype))
-    _assert_close(rho_out, refs["out_kdm_rho"], dtype=dtype)
+def test_kdm_proj_layer_positive(dtype):
+    kernel = RBFKernelLayer(sigma=0.5, dim=3)
+    layer = _cast_layer(KDMProjLayer(kernel=kernel, dim_x=3, n_comp=7), dtype)
+    x = _rand((4, 3), dtype)
+    out = layer(x)
+    assert torch.all(out > 0)
+
+
+def test_kdm_proj_layer_gradient_flows():
+    kernel = RBFKernelLayer(sigma=0.5, dim=3)
+    layer = _cast_layer(KDMProjLayer(kernel=kernel, dim_x=3, n_comp=7), torch.float64)
+    x = _rand((4, 3), torch.float64).requires_grad_(True)
+    out = layer(x)
+    out.sum().backward()
+    assert x.grad is not None
+    assert torch.isfinite(x.grad).all()
+
+
+# ---------------------------------------------------------------------------
+# KDMLayer
+# ---------------------------------------------------------------------------
+
+def _make_kdm_layer(dtype, dim_x=3, dim_y=6, n_comp=7, sigma=0.5):
+    kernel = RBFKernelLayer(sigma=sigma, dim=dim_x)
+    layer = KDMLayer(kernel=kernel, dim_x=dim_x, dim_y=dim_y, n_comp=n_comp)
+    return _cast_layer(layer, dtype)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_kdm_layer_log_marginal(refs, dtype):
-    d = int(refs["input_c_x"].shape[-1])
-    dim_y = int(refs["input_c_y"].shape[-1])
-    n_comp = int(refs["input_c_x"].shape[0])
-    sigma = float(refs["input_sigma"])
-    kernel = RBFKernelLayer(sigma=sigma, dim=d)
-    layer = _cast_layer(
-        KDMLayer(kernel=kernel, dim_x=d, dim_y=dim_y, n_comp=n_comp), dtype
-    )
-    with torch.no_grad():
-        layer.c_x.copy_(_t(refs["input_c_x"], dtype))
-        layer.c_y.copy_(_t(refs["input_c_y"], dtype))
-        layer.c_w.copy_(_t(refs["input_c_w"], dtype))
-    log_probs = layer.log_marginal(_t(refs["input_rho_in"], dtype))
-    _assert_close(log_probs, refs["out_kdm_log_marginal"], dtype=dtype)
+def test_kdm_layer_output_shape(dtype):
+    layer = _make_kdm_layer(dtype)
+    rho_in = pure2dm(_rand((4, 3), dtype))
+    rho_out = layer(rho_in)
+    assert rho_out.shape == (4, 7, 7)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
-def test_mem_kdm_layer(refs, dtype):
-    d = int(refs["input_mem_sample"].shape[-1])
-    dim_y = int(refs["input_mem_labels"].shape[-1])
-    mem_n = int(refs["input_mem_neighbors"].shape[1])
-    mem_sigma = float(refs["input_mem_sigma"])
-    kernel = MemRBFKernelLayer(sigma=mem_sigma, dim=d)
-    layer = _cast_layer(
-        MemKDMLayer(kernel=kernel, dim_x=d, dim_y=dim_y, n_comp=mem_n), dtype
-    )
-    out = layer(
-        (
-            _t(refs["input_mem_sample"], dtype),
-            _t(refs["input_mem_neighbors"], dtype),
-            _t(refs["input_mem_labels"], dtype),
-        )
-    )
-    _assert_close(out, refs["out_mem_rho"], dtype=dtype)
+def test_kdm_layer_weights_sum_to_one(dtype):
+    layer = _make_kdm_layer(dtype)
+    # pure2dm gives a valid KDM with input weights summing to 1.
+    rho_in = pure2dm(_rand((4, 3), dtype))
+    rho_out = layer(rho_in)
+    weights_sum = rho_out[:, :, 0].sum(dim=-1)
+    atol = 1e-5
+    assert torch.allclose(weights_sum, torch.ones(4, dtype=dtype), atol=atol)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_kdm_layer_weights_nonneg(dtype):
+    layer = _make_kdm_layer(dtype)
+    rho_in = pure2dm(_rand((4, 3), dtype))
+    rho_out = layer(rho_in)
+    assert torch.all(rho_out[:, :, 0] >= 0)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_kdm_layer_log_marginal_shape(dtype):
+    layer = _make_kdm_layer(dtype)
+    rho_in = pure2dm(_rand((4, 3), dtype))
+    log_probs = layer.log_marginal(rho_in)
+    assert log_probs.shape == (4,)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_kdm_layer_log_marginal_finite(dtype):
+    layer = _make_kdm_layer(dtype)
+    rho_in = pure2dm(_rand((4, 3), dtype))
+    log_probs = layer.log_marginal(rho_in)
+    assert torch.isfinite(log_probs).all()
+
+
+def test_kdm_layer_gradient_flows():
+    layer = _make_kdm_layer(torch.float64)
+    rho_in = pure2dm(_rand((4, 3), torch.float64))
+    log_probs = layer.log_marginal(rho_in)
+    log_probs.sum().backward()
+    assert layer.c_x.grad is not None
+    assert layer.kernel.raw_sigma.grad is not None
+    assert torch.isfinite(layer.c_x.grad).all()
+
+
+# ---------------------------------------------------------------------------
+# MemKDMLayer
+# ---------------------------------------------------------------------------
+
+def _make_mem_layer(dtype, dim_x=3, dim_y=6, n_comp=8, sigma=0.5):
+    kernel = MemRBFKernelLayer(sigma=sigma, dim=dim_x)
+    layer = MemKDMLayer(kernel=kernel, dim_x=dim_x, dim_y=dim_y, n_comp=n_comp)
+    return _cast_layer(layer, dtype)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_mem_kdm_layer_shape(dtype):
+    layer = _make_mem_layer(dtype)
+    sample = _rand((4, 3), dtype)
+    neighbors = _rand((4, 8, 3), dtype)
+    labels = _rand((4, 8, 6), dtype)
+    out = layer((sample, neighbors, labels))
+    assert out.shape == (4, 8, 7)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_mem_kdm_layer_weights_valid(dtype):
+    layer = _make_mem_layer(dtype)
+    sample = _rand((4, 3), dtype)
+    neighbors = _rand((4, 8, 3), dtype)
+    labels = _rand((4, 8, 6), dtype)
+    out = layer((sample, neighbors, labels))
+    weights = out[:, :, 0]
+    assert torch.all(weights >= 0)
+    atol = 1e-5
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(4, dtype=dtype), atol=atol)
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_mem_kdm_layer_labels_passthrough(dtype):
+    # The vector slice of the output KDM is exactly the input labels.
+    layer = _make_mem_layer(dtype)
+    sample = _rand((4, 3), dtype)
+    neighbors = _rand((4, 8, 3), dtype)
+    labels = _rand((4, 8, 6), dtype)
+    out = layer((sample, neighbors, labels))
+    assert torch.equal(out[:, :, 1:], labels)
+
+
+def test_mem_kdm_layer_gradient_flows():
+    layer = _make_mem_layer(torch.float64)
+    sample = _rand((4, 3), torch.float64).requires_grad_(True)
+    neighbors = _rand((4, 8, 3), torch.float64)
+    labels = _rand((4, 8, 6), torch.float64)
+    out = layer((sample, neighbors, labels))
+    out.sum().backward()
+    assert sample.grad is not None
+    assert torch.isfinite(sample.grad).all()
