@@ -28,7 +28,7 @@ Memory-based models additionally require `faiss`:
 pip install 'kdm-torch[mem]'
 ```
 
-Check our [examples](https://github.com/fagonzalezo/kdm/tree/main/examples) to see what you can do.
+Start with the [introduction notebook](examples/kdm_introduction.ipynb) for a guided tour of the library, then explore the full [examples](https://github.com/fagonzalezo/kdm/tree/main/examples) directory.
 
 ## Quickstart
 
@@ -49,6 +49,17 @@ for xb, yb in loader:
     loss  = nn.functional.nll_loss(torch.log(probs + 1e-8), yb)
     opt.zero_grad(); loss.backward(); opt.step()
 ```
+## Claude Code Skill
+
+The `skills/` directory contains a [Claude Code](https://claude.ai/code) skill that equips AI coding agents with deep knowledge of kdm-torch. Once installed, the agent automatically applies correct initialization patterns, composes loss functions, and avoids common pitfalls.
+
+The skill includes:
+- **SKILL.md** — trigger conditions, 4-step universal workflow, task snapshots, loss toolkit, and common pitfalls
+- **references/** — complete runnable scaffolds for Classification, Regression, Density estimation, Uncertainty quantification, and Generative co-training
+- **evals/** — evaluation test cases for validating skill behavior
+
+To install, copy `skills/kdm/` into your project's `.claude/skills/` directory and register it in your Claude Code settings.
+
 ## Paper
 
 > **Kernel Density Matrices for Probabilistic Deep Learning**

@@ -1,0 +1,58 @@
+{
+  "skill_name": "kdm",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I want to classify tabular data with 10 features into 3 classes using KDM. How do I set it up?",
+      "expected_output": "A working scaffold that: (1) creates a KDMClassModel with encoded_size, dim_y=3, encoder, n_comp; (2) calls init_kdm_layer with encoded training data and one-hot labels before training; (3) has an explicit training loop using F.nll_loss on log(probs); (4) does NOT call model.fit().",
+      "assertions": [
+        { "type": "contains", "value": "KDMClassModel" },
+        { "type": "contains", "value": "init_kdm_layer" },
+        { "type": "contains", "value": "nll_loss" },
+        { "type": "not_contains", "value": ".fit(" }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Show me how to do probabilistic regression with KDM to get prediction uncertainty.",
+      "expected_output": "A working scaffold that: (1) creates a KDMRegressModel; (2) calls init_kdm_layer with encoded training data and targets; (3) uses dm_rbf_loglik for the NLL loss; (4) calls model.predict_reg() for inference to get mean and variance.",
+      "assertions": [
+        { "type": "contains", "value": "KDMRegressModel" },
+        { "type": "contains", "value": "init_kdm_layer" },
+        { "type": "contains", "value": "dm_rbf_loglik" },
+        { "type": "contains", "value": "predict_reg" }
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "How do I estimate the density of a dataset using KDM?",
+      "expected_output": "A scaffold that: (1) creates a KDMDenEstModel; (2) calls init_kdm_proj_layer with a random subset of training data; (3) minimises -model(x).mean() in the training loop; (4) calls model.get_distrib() after training.",
+      "assertions": [
+        { "type": "contains", "value": "KDMDenEstModel" },
+        { "type": "contains", "value": "init_kdm_proj_layer" },
+        { "type": "contains", "value": "get_distrib" },
+        { "type": "not_contains", "value": ".fit(" }
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "I trained a KDM classifier. How can I use it to detect out-of-distribution inputs?",
+      "expected_output": "Code that computes predictive entropy from model output probabilities using -(probs * log(probs)).sum() and explains that high entropy indicates OOD inputs. Should NOT suggest temperature scaling or post-hoc calibration.",
+      "assertions": [
+        { "type": "contains", "value": "entropy" },
+        { "type": "contains", "value": "clamp_min" },
+        { "type": "contains", "value": "log_marginal" }
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "How do I add generative co-training to a KDM classifier?",
+      "expected_output": "Code that: (1) freezes the encoder with requires_grad_(False); (2) adds -model.kdm.log_marginal(rho_x).mean() weighted by alpha to the discriminative loss; (3) uses pure2dm to wrap encoder outputs.",
+      "assertions": [
+        { "type": "contains", "value": "requires_grad_(False)" },
+        { "type": "contains", "value": "log_marginal" },
+        { "type": "contains", "value": "pure2dm" }
+      ]
+    }
+  ]
+}
