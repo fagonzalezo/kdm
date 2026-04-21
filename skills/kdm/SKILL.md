@@ -217,3 +217,20 @@ for xb, yb in dataloader:
 - **n_comp must equal subset size** — the number of components passed to the
   model constructor must match the number of rows in the data passed to the
   init helper.
+
+---
+
+## Building custom models with KDMLayer directly
+
+When the built-in model classes don't fit the task, use `KDMLayer` and
+`KDMProjLayer` directly. See `references/kdm_layer.md` for:
+
+- KDM tensor format `(bs, n_comp, dim+1)` and the `pure2dm` / `dm2comp` /
+  `comp2dm` utilities
+- `KDMLayer` constructor arguments, trainable parameters, `forward`, and
+  `log_marginal` signatures
+- `KDMProjLayer` for density estimation
+- All kernel options: `RBFKernelLayer`, `CosineKernelLayer`,
+  `CrossProductKernelLayer`, `CompTransKernelLayer`
+- Initialization with `init_kdm_layer` / `init_kdm_proj_layer`
+- A complete custom two-headed model example

@@ -13,6 +13,9 @@ class KDMClassModel(nn.Module):
     controls `encoder.requires_grad_(False)`) and add
     `-generative * kdm.log_marginal(pure2dm(encoder(x))).mean()` to the
     training-loop loss.
+
+    Trainability of KDM prototypes is controlled by `x_train`, `y_train`,
+    and `w_train`.
     """
 
     def __init__(
@@ -24,6 +27,8 @@ class KDMClassModel(nn.Module):
         sigma: float = 0.1,
         sigma_trainable: bool = True,
         min_sigma: float = 1e-3,
+        x_train: bool = True,
+        y_train: bool = True,
         w_train: bool = True,
     ):
         super().__init__()
@@ -40,6 +45,8 @@ class KDMClassModel(nn.Module):
             dim_x=encoded_size,
             dim_y=dim_y,
             n_comp=n_comp,
+            x_train=x_train,
+            y_train=y_train,
             w_train=w_train,
         )
 
