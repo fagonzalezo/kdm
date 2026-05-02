@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ...utils import dm2comp
+from ...utils import dm2comp, pure2dm
 from ..mem import MemKDMClassModel
 
 
@@ -120,9 +120,10 @@ class MemKDMClassModelWrapper:
             y_neigh_ohe = F.one_hot(
                 torch.as_tensor(y_neigh_np).long(), num_classes=self.dim_y
             ).to(torch.as_tensor(x_enc_np).dtype)
+            rho_x = pure2dm(torch.as_tensor(x_enc_np))
             rho_y = self.model.mkdm(
                 (
-                    torch.as_tensor(x_enc_np),
+                    rho_x,
                     torch.as_tensor(x_neigh_np),
                     y_neigh_ohe,
                 )

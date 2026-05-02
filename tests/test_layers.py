@@ -307,20 +307,20 @@ def _make_mem_layer(dtype, dim_x=3, dim_y=6, n_comp=8, sigma=0.5):
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
 def test_mem_kdm_layer_shape(dtype):
     layer = _make_mem_layer(dtype)
-    sample = _rand((4, 3), dtype)
+    rho_in = pure2dm(_rand((4, 3), dtype))
     neighbors = _rand((4, 8, 3), dtype)
     labels = _rand((4, 8, 6), dtype)
-    out = layer((sample, neighbors, labels))
+    out = layer((rho_in, neighbors, labels))
     assert out.shape == (4, 8, 7)
 
 
 @pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
 def test_mem_kdm_layer_weights_valid(dtype):
     layer = _make_mem_layer(dtype)
-    sample = _rand((4, 3), dtype)
+    rho_in = pure2dm(_rand((4, 3), dtype))
     neighbors = _rand((4, 8, 3), dtype)
     labels = _rand((4, 8, 6), dtype)
-    out = layer((sample, neighbors, labels))
+    out = layer((rho_in, neighbors, labels))
     weights = out[:, :, 0]
     assert torch.all(weights >= 0)
     atol = 1e-5
@@ -331,19 +331,51 @@ def test_mem_kdm_layer_weights_valid(dtype):
 def test_mem_kdm_layer_labels_passthrough(dtype):
     # The vector slice of the output KDM is exactly the input labels.
     layer = _make_mem_layer(dtype)
-    sample = _rand((4, 3), dtype)
+    rho_in = pure2dm(_rand((4, 3), dtype))
     neighbors = _rand((4, 8, 3), dtype)
     labels = _rand((4, 8, 6), dtype)
-    out = layer((sample, neighbors, labels))
+    out = layer((rho_in, neighbors, labels))
     assert torch.equal(out[:, :, 1:], labels)
 
 
 def test_mem_kdm_layer_gradient_flows():
     layer = _make_mem_layer(torch.float64)
     sample = _rand((4, 3), torch.float64).requires_grad_(True)
+    rho_in = pure2dm(sample)
     neighbors = _rand((4, 8, 3), torch.float64)
     labels = _rand((4, 8, 6), torch.float64)
-    out = layer((sample, neighbors, labels))
+    out = layer((rho_in, neighbors, labels))
     out.sum().backward()
+    assert sample.grad is not None
+    assert torch.isfinite(sample.grad).all()
+
+
+@pytest.mark.parametrize("dtype", DTYPES, ids=DTYPE_IDS)
+def test_mem_kdm_layer_mixed_input(dtype):
+    # Verify that a multi-component input KDM (n_comp_in > 1) is handled
+    # correctly: output shape is unchanged and weights still sum to 1.
+    layer = _make_mem_layer(dtype, n_comp=8)
+    n_comp_in = 3
+    raw_w = _rand((4, n_comp_in), dtype).abs() + 0.1
+    in_w = raw_w / raw_w.sum(dim=1, keepdim=True)           # (4, n_comp_in), sums to 1
+    in_v = _rand((4, n_comp_in, 3), dtype)
+    rho_in = torch.cat((in_w.unsqueeze(-1), in_v), dim=2)   # (4, n_comp_in, dim_x+1)
+    neighbors = _rand((4, 8, 3), dtype)
+    labels = _rand((4, 8, 6), dtype)
+    out = layer((rho_in, neighbors, labels))
+    assert out.shape == (4, 8, 7)
+    atol = 1e-5
+    assert torch.allclose(out[:, :, 0].sum(dim=-1), torch.ones(4, dtype=dtype), atol=atol)
+
+
+def test_mem_kdm_layer_log_marginal():
+    layer = _make_mem_layer(torch.float64)
+    sample = _rand((4, 3), torch.float64).requires_grad_(True)
+    rho_in = pure2dm(sample)
+    neighbors = _rand((4, 8, 3), torch.float64)
+    lm = layer.log_marginal(rho_in, neighbors)
+    assert lm.shape == (4,)
+    assert torch.isfinite(lm).all()
+    lm.sum().backward()
     assert sample.grad is not None
     assert torch.isfinite(sample.grad).all()

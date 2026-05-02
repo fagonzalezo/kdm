@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ...layers import MemKDMLayer, MemRBFKernelLayer
-from ...utils import dm2discrete
+from ...utils import dm2discrete, pure2dm
 
 
 class MemKDMClassModel(nn.Module):
@@ -35,6 +35,7 @@ class MemKDMClassModel(nn.Module):
 
     def forward(self, inputs):
         x_enc, x_neigh, y_neigh = inputs
+        rho_x = pure2dm(x_enc)
         y_neigh_ohe = F.one_hot(y_neigh.long(), num_classes=self.dim_y).to(x_enc.dtype)
-        rho_y = self.mkdm((x_enc, x_neigh, y_neigh_ohe))
+        rho_y = self.mkdm((rho_x, x_neigh, y_neigh_ohe))
         return dm2discrete(rho_y)
